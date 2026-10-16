@@ -58,6 +58,13 @@ alter table public.administradores enable row level security;
 revoke all on public.reservas from anon, authenticated;
 revoke all on public.administradores from anon, authenticated;
 
+-- Permisos explícitos (necesarios si el proyecto se creó sin
+-- "Automatically expose new tables"). service_role es la que usa
+-- la función del servidor; nunca sale del servidor.
+grant usage on schema public to anon, authenticated, service_role;
+grant all on public.reservas to service_role;
+grant all on public.administradores to service_role;
+
 grant select (id, recurso, inicio, fin, nombre, actividad, correo_investigador)
   on public.reservas to anon, authenticated;
 
