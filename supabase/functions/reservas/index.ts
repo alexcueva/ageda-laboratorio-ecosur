@@ -1,0 +1,295 @@
+// =====================================================================
+// Agenda Lad-ICI · Función del servidor "reservas" (Supabase Edge Function)
+//
+// Acciones (POST JSON con campo "accion"):
+//   crear           → valida y guarda una reserva; correo al alumno y al investigador
+//   ver             → datos de una reserva a partir de su enlace de cancelación
+//   cancelar        → cancela con el token del enlace (quien reservó)
+//   cancelar_admin  → cancela cualquier reserva (requiere sesión de administrador)
+//   detalle_admin   → correo del alumno de una reserva (solo administradores)
+//
+// Secretos (Edge Functions → Secrets):
+//   BREVO_API_KEY     clave de API de Brevo para enviar correos
+//   REMITENTE_CORREO  correo remitente verificado en Brevo
+//   REMITENTE_NOMBRE  nombre del remitente (opcional)
+//   SITIO_URL         dirección de la página en GitHub Pages, p. ej.
+//                     https://usuario.github.io/agenda-ladici/
+// SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY los pone Supabase automáticamente.
+// =====================================================================
+
+import { createClient } from "npm:@supabase/supabase-js@2.45.4";
+
+const LAB = "Lad-ICI";
+const RECURSOS: Record<string, string> = {
+  lab1: "Lab 1",
+  lab2: "Lab 2",
+  lab3: "Lab 3",
+  flujo: "Campana de flujo laminar",
+  extraccion: "Campana de extracción",
+};
+const ABRE = 8 * 60, CIERRA = 22 * 60, PASO = 30;
+const ZONA = "America/Mexico_City";
+const OFFSET = "-06:00"; // Centro de México: sin horario de verano desde 2022
+
+const SITIO = Deno.env.get("SITIO_URL") ?? "";
+const BREVO = Deno.env.get("BREVO_API_KEY") ?? "";
+const REM_CORREO = Deno.env.get("REMITENTE_CORREO") ?? "";
+const REM_NOMBRE = Deno.env.get("REMITENTE_NOMBRE") ?? `Agenda ${LAB}`;
+
+const db = createClient(
+  Deno.env.get("SUPABASE_URL")!,
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  { auth: { persistSession: false, autoRefreshToken: false } },
+);
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
+const fallo = (error: string, status = 400) => json({ error }, status);
+
+// deno-lint-ignore no-explicit-any
+type Reserva = Record<string, any>;
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  if (req.method !== "POST") return fallo("Método no permitido.", 405);
+  // deno-lint-ignore no-explicit-any
+  let b: any;
+  try { b = await req.json(); } catch { return fallo("Solicitud inválida."); }
+  try {
+    switch (b?.accion) {
+      case "crear": return await crear(b);
+      case "ver": return await ver(b);
+      case "cancelar": return await cancelar(b);
+      case "cancelar_admin": return await cancelarAdmin(req, b);
+      case "detalle_admin": return await detalleAdmin(req, b);
+      default: return fallo("Acción desconocida.");
+    }
+  } catch (e) {
+    console.error(e);
+    return fallo("Error interno del servidor. Intenta de nuevo en un momento.", 500);
+  }
+});
+
+/* ---------------- utilidades ---------------- */
+const pad = (n: number) => String(n).padStart(2, "0");
+const marca = (fecha: string, min: number) => `${fecha}T${pad(Math.floor(min / 60))}:${pad(min % 60)}:00${OFFSET}`;
+const correoOk = (v: string) => v.length <= 200 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+const esUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+const esc = (s: unknown) =>
+  String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+
+const fFecha = new Intl.DateTimeFormat("es-MX", { timeZone: ZONA, weekday: "long", day: "numeric", month: "long", year: "numeric" });
+const fHora = new Intl.DateTimeFormat("es-MX", { timeZone: ZONA, hour: "numeric", minute: "2-digit", hourCycle: "h23" });
+const cuando = (r: Reserva) =>
+  `${fFecha.format(new Date(r.inicio))}, de ${fHora.format(new Date(r.inicio))} a ${fHora.format(new Date(r.fin))}`;
+
+function enlaceCancelar(r: Reserva) {
+  if (!SITIO) return "";
+  const u = new URL(SITIO);
+  u.searchParams.set("cancelar", r.id);
+  u.searchParams.set("t", r.token_cancelacion);
+  return u.toString();
+}
+
+const publica = (r: Reserva) => ({
+  id: r.id, recurso: r.recurso, inicio: r.inicio, fin: r.fin, nombre: r.nombre,
+  actividad: r.actividad, correo_investigador: r.correo_investigador,
+  cancelada: !!r.cancelada_en, terminada: new Date(r.fin).getTime() <= Date.now(),
+});
+
+/* ---------------- acciones ---------------- */
+// deno-lint-ignore no-explicit-any
+async function crear(b: any) {
+  const recurso = String(b.recurso ?? "");
+  if (!RECURSOS[recurso]) return fallo("Espacio no válido.");
+  const fecha = String(b.fecha ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return fallo("Fecha no válida.");
+  const ini = Number(b.inicio), fin = Number(b.fin);
+  if (!Number.isInteger(ini) || !Number.isInteger(fin) || ini % PASO || fin % PASO || ini < ABRE || fin > CIERRA || fin <= ini) {
+    return fallo("Horario no válido. Se reserva de 8:00 a 22:00 en bloques de 30 minutos.");
+  }
+  const nombre = String(b.nombre ?? "").trim();
+  if (nombre.length < 2 || nombre.length > 120) return fallo("Escribe tu nombre completo.");
+  const correo_alumno = String(b.correo_alumno ?? "").trim().toLowerCase();
+  if (!correoOk(correo_alumno)) return fallo("Revisa el correo del alumno.");
+  const correo_investigador = String(b.correo_investigador ?? "").trim().toLowerCase();
+  if (!correoOk(correo_investigador)) return fallo("Revisa el correo del investigador responsable.");
+  const actividad = String(b.actividad ?? "").trim().slice(0, 200) || null;
+
+  const inicio = marca(fecha, ini), termino = marca(fecha, fin);
+  const t0 = new Date(inicio).getTime();
+  if (Number.isNaN(t0)) return fallo("Fecha no válida.");
+  if (t0 + PASO * 60000 <= Date.now()) return fallo("Ese horario ya pasó. Elige uno a partir de ahora.");
+
+  const { data, error } = await db.from("reservas")
+    .insert({ recurso, inicio, fin: termino, nombre, correo_alumno, correo_investigador, actividad })
+    .select("*").single();
+  if (error) {
+    if (error.code === "23P01") return fallo("Ese horario acaba de ser apartado por alguien más. La agenda se actualizó; elige otro.", 409);
+    if (error.code === "22008" || error.code === "22007") return fallo("Fecha no válida.");
+    throw error;
+  }
+  const correo_enviado = await correoConfirmacion(data);
+  return json({ id: data.id, token: data.token_cancelacion, correo_enviado });
+}
+
+// deno-lint-ignore no-explicit-any
+async function porToken(b: any): Promise<Reserva | null> {
+  const id = String(b.id ?? ""), t = String(b.token ?? "");
+  if (!esUuid(id) || !esUuid(t)) return null;
+  const { data, error } = await db.from("reservas").select("*").eq("id", id).eq("token_cancelacion", t).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+// deno-lint-ignore no-explicit-any
+async function ver(b: any) {
+  const r = await porToken(b);
+  if (!r) return fallo("No encontramos esa reserva. Revisa que el enlace esté completo.", 404);
+  return json({ reserva: { ...publica(r), correo_alumno: r.correo_alumno } });
+}
+
+async function marcarCancelada(r: Reserva, por: string) {
+  const { data, error } = await db.from("reservas")
+    .update({ cancelada_en: new Date().toISOString(), cancelada_por: por })
+    .eq("id", r.id).is("cancelada_en", null).select("id");
+  if (error) throw error;
+  return (data?.length ?? 0) > 0;
+}
+
+function revisarCancelable(r: Reserva) {
+  if (r.cancelada_en) return fallo("Esta reserva ya estaba cancelada.", 409);
+  if (new Date(r.fin).getTime() <= Date.now()) return fallo("Esta reserva ya terminó y no se puede cancelar.", 409);
+  return null;
+}
+
+// deno-lint-ignore no-explicit-any
+async function cancelar(b: any) {
+  const r = await porToken(b);
+  if (!r) return fallo("No encontramos esa reserva. Revisa que el enlace esté completo.", 404);
+  const no = revisarCancelable(r); if (no) return no;
+  if (!(await marcarCancelada(r, "propietario"))) return fallo("Esta reserva ya estaba cancelada.", 409);
+  await correoCancelacion(r, null);
+  return json({ ok: true });
+}
+
+async function correoAdmin(req: Request): Promise<string | null> {
+  const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+  if (!jwt) return null;
+  const { data, error } = await db.auth.getUser(jwt);
+  const email = data?.user?.email?.toLowerCase();
+  if (error || !email) return null;
+  const { data: lista, error: e2 } = await db.from("administradores").select("correo");
+  if (e2) throw e2;
+  return (lista ?? []).some((a) => String(a.correo).toLowerCase() === email) ? email : null;
+}
+
+// deno-lint-ignore no-explicit-any
+async function cargarPorId(b: any): Promise<Reserva | null> {
+  const id = String(b.id ?? "");
+  if (!esUuid(id)) return null;
+  const { data, error } = await db.from("reservas").select("*").eq("id", id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+// deno-lint-ignore no-explicit-any
+async function cancelarAdmin(req: Request, b: any) {
+  const admin = await correoAdmin(req);
+  if (!admin) return fallo("Tu sesión no tiene permisos de administrador. Vuelve a iniciar sesión.", 403);
+  const r = await cargarPorId(b);
+  if (!r) return fallo("No encontramos esa reserva.", 404);
+  const no = revisarCancelable(r); if (no) return no;
+  if (!(await marcarCancelada(r, `admin:${admin}`))) return fallo("Esta reserva ya estaba cancelada.", 409);
+  await correoCancelacion(r, admin);
+  return json({ ok: true });
+}
+
+// deno-lint-ignore no-explicit-any
+async function detalleAdmin(req: Request, b: any) {
+  if (!(await correoAdmin(req))) return fallo("Tu sesión no tiene permisos de administrador.", 403);
+  const r = await cargarPorId(b);
+  if (!r) return fallo("No encontramos esa reserva.", 404);
+  return json({ correo_alumno: r.correo_alumno });
+}
+
+/* ---------------- correos ---------------- */
+async function enviar(para: string[], asunto: string, html: string): Promise<boolean> {
+  if (!BREVO || !REM_CORREO) {
+    console.warn("Correo no configurado: faltan BREVO_API_KEY o REMITENTE_CORREO.");
+    return false;
+  }
+  const dest = [...new Set(para.map((p) => p.toLowerCase()))];
+  // deno-lint-ignore no-explicit-any
+  const cuerpo: any = {
+    sender: { name: REM_NOMBRE, email: REM_CORREO },
+    to: [{ email: dest[0] }],
+    subject: asunto,
+    htmlContent: html,
+  };
+  if (dest.length > 1) cuerpo.cc = dest.slice(1).map((email) => ({ email }));
+  try {
+    const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: { "api-key": BREVO, "Content-Type": "application/json", accept: "application/json" },
+      body: JSON.stringify(cuerpo),
+    });
+    if (!res.ok) { console.error("Brevo", res.status, await res.text()); return false; }
+    return true;
+  } catch (e) {
+    console.error("Brevo", e);
+    return false;
+  }
+}
+
+function plantilla(titulo: string, filas: [string, string][], pie: string) {
+  const tabla = filas.map(([k, v]) =>
+    `<tr><td style="padding:4px 16px 4px 0;color:#5a6964;vertical-align:top">${esc(k)}</td><td style="padding:4px 0;color:#14201c">${v}</td></tr>`
+  ).join("");
+  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#14201c;max-width:560px">
+<p style="margin:0 0 4px;color:#0e6a54;font-weight:bold">Agenda ${LAB}</p>
+<h2 style="margin:0 0 16px;font-size:20px">${esc(titulo)}</h2>
+<table style="border-collapse:collapse;margin-bottom:16px">${tabla}</table>
+${pie}
+<p style="margin:24px 0 0;font-size:12px;color:#5a6964">Laboratorio de Investigación Científica Interdisciplinaria (${LAB}). Este correo se generó automáticamente.</p>
+</div>`;
+}
+
+const filasReserva = (r: Reserva): [string, string][] => [
+  ["Espacio", esc(RECURSOS[r.recurso] ?? r.recurso)],
+  ["Fecha y hora", esc(cuando(r))],
+  ["Reservó", esc(r.nombre)],
+  ["Alumno", esc(r.correo_alumno)],
+  ["Responsable", esc(r.correo_investigador)],
+  ...(r.actividad ? [["Actividad", esc(r.actividad)] as [string, string]] : []),
+];
+
+function correoConfirmacion(r: Reserva) {
+  const link = enlaceCancelar(r);
+  const pie = link
+    ? `<p style="margin:0 0 8px">Si ya no vas a usar el espacio, libéralo para que alguien más pueda apartarlo:</p>
+<p style="margin:0"><a href="${esc(link)}" style="display:inline-block;background:#0e6a54;color:#ffffff;text-decoration:none;padding:9px 16px;border-radius:6px">Cancelar esta reserva</a></p>
+<p style="margin:8px 0 0;font-size:12px;color:#5a6964">Este enlace es personal; no lo reenvíes.</p>`
+    : "";
+  return enviar(
+    [r.correo_alumno, r.correo_investigador],
+    `Reserva confirmada · ${RECURSOS[r.recurso]} · ${cuando(r)}`,
+    plantilla("Reserva confirmada", filasReserva(r), pie),
+  );
+}
+
+function correoCancelacion(r: Reserva, admin: string | null) {
+  const pie = admin
+    ? `<p style="margin:0">La reserva fue cancelada por la administración del laboratorio (${esc(admin)}). Si tienes dudas, responde a ese correo.</p>`
+    : `<p style="margin:0">La reserva fue cancelada desde el enlace de cancelación. El horario quedó libre.</p>`;
+  return enviar(
+    [r.correo_alumno, r.correo_investigador],
+    `Reserva cancelada · ${RECURSOS[r.recurso]} · ${cuando(r)}`,
+    plantilla("Reserva cancelada", filasReserva(r), pie),
+  );
+}

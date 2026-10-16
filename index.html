@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Agenda Lad-ICI</title>
+<meta name="description" content="Reservas de espacios comunes del Laboratorio de Investigación Científica Interdisciplinaria (Lad-ICI).">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Agenda del Lad-ICI <span class="tag" id="adminTag" hidden>Administrador</span></h1>
+      <p class="sub">Laboratorio de Investigación Científica Interdisciplinaria · ECOSUR · 8:00 a 22:00, bloques de 30 min</p>
+    </div>
+  </header>
+
+  <div class="status" id="status" role="status" hidden></div>
+
+  <div class="controls">
+    <div class="group">
+      <div class="seg" role="group" aria-label="Vista">
+        <button type="button" id="vDia" aria-pressed="true">Día</button>
+        <button type="button" id="vSem" aria-pressed="false">Semana</button>
+      </div>
+      <button class="btn icon" id="prev" type="button" aria-label="Anterior">‹</button>
+      <button class="btn" id="today" type="button">Hoy</button>
+      <button class="btn icon" id="next" type="button" aria-label="Siguiente">›</button>
+    </div>
+    <div class="datelabel" id="dateLabel" aria-live="polite"></div>
+  </div>
+
+  <div class="chips" id="chips" hidden aria-label="Espacio"></div>
+
+  <div class="grid-wrap" id="gridWrap"><div id="grid"></div></div>
+
+  <div class="legend">
+    <span><i class="sw other"></i>Reservado</span>
+    <span><i class="sw mine"></i>Tus reservas (en este navegador)</span>
+    <span><i class="sw past"></i>Horario pasado</span>
+    <span>Toca un espacio libre para reservar</span>
+  </div>
+
+  <footer class="foot">
+    <span id="adminInfo"></span>
+    <button class="link-btn" id="adminBtn" type="button">Acceso de administradores</button>
+  </footer>
+</div>
+
+<div class="overlay" id="overlay" hidden><div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle"></div></div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
