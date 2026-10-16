@@ -9,6 +9,6 @@
 // (sección 5), porque este archivo lo puede ver y modificar cualquiera.
 // =====================================================================
 window.AGENDA_CONFIG = {
-  supabaseUrl: 'https://TU-PROYECTO.supabase.co',
-  supabaseKey: 'TU-CLAVE-PUBLICA'
+  supabaseUrl: 'https://ngagmlkomfxnqvabbhes.supabase.co',
+  supabaseKey: 'sb_publishable_bW9wdsEsUQehZamVVcIEbQ_GuJELB2t'
 };
