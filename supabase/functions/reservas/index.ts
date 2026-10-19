@@ -15,7 +15,7 @@
 //   REMITENTE_NOMBRE  nombre del remitente (opcional)
 //   SITIO_URL         dirección de la página en GitHub Pages, p. ej.
 //                     https://usuario.github.io/agenda-ladici/
-// SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY los pone Supabase automáticamente.
+// SUPABASE_URL y la clave de servidor los pone Supabase automáticamente.
 // =====================================================================
 
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
@@ -38,9 +38,21 @@ const BREVO = Deno.env.get("BREVO_API_KEY") ?? "";
 const REM_CORREO = Deno.env.get("REMITENTE_CORREO") ?? "";
 const REM_NOMBRE = Deno.env.get("REMITENTE_NOMBRE") ?? `Agenda ${LAB}`;
 
+// Clave de servidor: formato nuevo (SUPABASE_SECRET_KEYS) o antiguo (service_role).
+function claveServidor(): string {
+  try {
+    const d = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}");
+    const k = d.default ?? Object.values(d)[0];
+    if (typeof k === "string" && k) return k;
+  } catch { /* sin claves nuevas */ }
+  const legacy = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (legacy) return legacy;
+  throw new Error("No hay clave de servidor disponible en la función.");
+}
+
 const db = createClient(
   Deno.env.get("SUPABASE_URL")!,
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  claveServidor(),
   { auth: { persistSession: false, autoRefreshToken: false } },
 );
 
