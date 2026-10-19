@@ -9,6 +9,7 @@
 //   detalle_admin   → correo del alumno de una reserva (solo administradores)
 //
 // Secretos (Edge Functions → Secrets):
+// Todos son OPCIONALES: sin ellos la agenda funciona igual, solo no envía correos.
 //   BREVO_API_KEY     clave de API de Brevo para enviar correos
 //   REMITENTE_CORREO  correo remitente verificado en Brevo
 //   REMITENTE_NOMBRE  nombre del remitente (opcional)
@@ -225,8 +226,7 @@ async function detalleAdmin(req: Request, b: any) {
 /* ---------------- correos ---------------- */
 async function enviar(para: string[], asunto: string, html: string): Promise<boolean> {
   if (!BREVO || !REM_CORREO) {
-    console.warn("Correo no configurado: faltan BREVO_API_KEY o REMITENTE_CORREO.");
-    return false;
+    return false; // envío de correos desactivado
   }
   const dest = [...new Set(para.map((p) => p.toLowerCase()))];
   // deno-lint-ignore no-explicit-any

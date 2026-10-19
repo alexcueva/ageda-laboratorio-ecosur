@@ -55,6 +55,24 @@ const $ = id => document.getElementById(id);
 const CFG = window.AGENDA_CONFIG || {};
 const configurado = CFG.supabaseUrl && CFG.supabaseKey && !/TU-PROYECTO|TU-CLAVE/.test(CFG.supabaseUrl + CFG.supabaseKey);
 const sb = configurado && window.supabase ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey) : null;
+const CORREOS = CFG.correos === true;   // true solo si la función tiene configurado el envío (Brevo)
+const cancelLink = (id, t) => `${location.origin}${location.pathname}?cancelar=${encodeURIComponent(id)}&t=${encodeURIComponent(t)}`;
+
+// Bloque con el enlace personal de cancelación y botón para copiarlo.
+function linkBox(id, t){
+  return `<div class="field"><label for="cLink">Tu enlace de cancelación</label>
+    <div class="copyrow"><input id="cLink" readonly value="${esc(cancelLink(id, t))}"><button type="button" class="btn" id="cCopy">Copiar</button></div>
+    <small>Guárdalo: con él puedes cancelar desde cualquier dispositivo. Funciona como una llave; no lo compartas.</small></div>`;
+}
+function wireCopy(){
+  const btn = $('cCopy'), inp = $('cLink');
+  if (!btn || !inp) return;
+  btn.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(inp.value); btn.textContent = 'Copiado'; }
+    catch(e){ inp.focus(); inp.select(); btn.textContent = 'Selecciónalo y copia'; }
+    setTimeout(() => { btn.textContent = 'Copiar'; }, 2500);
+  });
+}
 
 async function api(body){
   const { data, error } = await sb.functions.invoke('reservas', { body });
@@ -236,7 +254,7 @@ function openForm(resId, date, start){
       ${hint ? `<span class="hint">${hint}</span>` : ''}
       <div class="field"><label for="fNom">Nombre completo</label><input id="fNom" required maxlength="120" autocomplete="name" value="${esc(dr.nombre)}"></div>
       <div class="field"><label for="fAlu">Correo del alumno</label><input id="fAlu" type="email" required maxlength="200" autocomplete="email" value="${esc(dr.alumno)}"></div>
-      <div class="field"><label for="fInv">Correo del investigador responsable</label><input id="fInv" type="email" required maxlength="200" value="${esc(dr.investigador)}"><small>Recibe copia de la confirmación.</small></div>
+      <div class="field"><label for="fInv">Correo del investigador responsable</label><input id="fInv" type="email" required maxlength="200" value="${esc(dr.investigador)}">${CORREOS ? '<small>Recibe copia de la confirmación.</small>' : ''}</div>
       <div class="field"><label for="fMot">Actividad <span style="font-weight:400;color:var(--muted)">(opcional)</span></label><input id="fMot" maxlength="200" placeholder="p. ej. extracción de ADN, digestión ácida"></div>
       <p class="err" id="fErr" hidden></p>
       <div class="actions"><button type="button" class="btn" data-close>Cancelar</button><button type="submit" class="btn primary" id="fGo">Reservar</button></div>
@@ -258,7 +276,7 @@ function openForm(resId, date, start){
       const res = await api({accion:'crear', recurso: resId, fecha: date, inicio: start, fin, nombre, correo_alumno: alumno, correo_investigador: investigador, actividad});
       mine[res.id] = {t: res.token, a: alumno.toLowerCase()}; saveMine();
       lsSet(DRAFT, {nombre, alumno, investigador});
-      showConfirm({res: resId, date, start, end: fin, nombre, motivo: actividad, alumno, investigador}, res.correo_enviado);
+      showConfirm({id: res.id, token: res.token, res: resId, date, start, end: fin, nombre, motivo: actividad, alumno, investigador}, res.correo_enviado);
       load();
     } catch(e){
       err.textContent = e.message; err.hidden = false;
@@ -274,10 +292,13 @@ function showConfirm(b, enviado){
     <div class="ok"><span class="ok-mark" aria-hidden="true">✓</span><h2 id="mTitle">Reserva confirmada</h2></div>
     ${metaLine(r, b.date, b.start, b.end)}
     <dl><dt>Nombre</dt><dd>${esc(b.nombre)}</dd>${b.motivo ? `<dt>Actividad</dt><dd>${esc(b.motivo)}</dd>` : ''}</dl>
-    ${enviado
-      ? `<p class="note">Enviamos la confirmación a <strong>${esc(b.alumno)}</strong> y a <strong>${esc(b.investigador)}</strong>. El correo trae un enlace para cancelar desde cualquier dispositivo.</p>`
-      : `<p class="note warn">La reserva quedó registrada, pero no se pudo enviar el correo de confirmación. Puedes cancelarla desde este navegador; si necesitas ayuda, avisa a un administrador.</p>`}
+    ${!CORREOS ? ''
+      : enviado ? `<p class="note">Enviamos la confirmación a <strong>${esc(b.alumno)}</strong> y a <strong>${esc(b.investigador)}</strong>.</p>`
+      : `<p class="note warn">La reserva quedó registrada, pero no se pudo enviar el correo de confirmación.</p>`}
+    ${linkBox(b.id, b.token)}
+    <p class="note">También puedes cancelarla desde este navegador. Si es una computadora compartida, quien la use después en este mismo navegador también podría cancelarla; mejor reserva desde tu celular o tu computadora.</p>
     <div class="actions"><button type="button" class="btn primary" data-close>Listo</button></div>`);
+  wireCopy();
 }
 
 /* ---------- detalle y cancelación ---------- */
@@ -294,9 +315,10 @@ function openDetail(id){
       ${alumno ? `<dt>Alumno</dt><dd>${alumno}</dd>` : ''}
       <dt>Responsable</dt><dd>${esc(b.investigador)}</dd>
     </dl>
-    ${!canCancel ? `<p class="note">Solo quien hizo la reserva o un administrador del laboratorio puede cancelarla. Quien reservó tiene un enlace de cancelación en su correo.</p><div class="actions"><button type="button" class="btn" data-close>Cerrar</button></div>`
+    ${!canCancel ? `<p class="note">Solo quien hizo la reserva o un administrador del laboratorio puede cancelarla. Quien reservó puede hacerlo desde su navegador o con su enlace de cancelación.</p><div class="actions"><button type="button" class="btn" data-close>Cerrar</button></div>`
       : ended ? `<p class="note">Esta reserva ya terminó.</p><div class="actions"><button type="button" class="btn" data-close>Cerrar</button></div>`
-      : `<p class="err" id="dErr" hidden></p><div class="actions" id="cxl"><button type="button" class="btn" data-close>Cerrar</button><button type="button" class="btn" data-ask>Cancelar reserva</button></div>`}`);
+      : `${own ? linkBox(id, own.t) : ''}<p class="err" id="dErr" hidden></p><div class="actions" id="cxl"><button type="button" class="btn" data-close>Cerrar</button><button type="button" class="btn" data-ask>Cancelar reserva</button></div>`}`);
+  wireCopy();
 
   if (state.admin && !(own && own.a)){
     api({accion:'detalle_admin', id}).then(d => { const el = $('dAlu'); if (el) el.outerHTML = esc(d.correo_alumno); })
@@ -307,14 +329,14 @@ function openDetail(id){
   if (!ask) return;
   ask.addEventListener('click', () => {
     const asAdmin = !own;
-    $('cxl').innerHTML = `${asAdmin ? `<p class="note" style="flex-basis:100%">Cancelarás esta reserva como administrador. Se avisará por correo al alumno y al investigador responsable.</p>` : ''}<span style="margin-right:auto;font-size:14px">¿Liberar este horario?</span><button type="button" class="btn" data-close>No</button><button type="button" class="btn danger" id="dYes">Sí, cancelar</button>`;
+    $('cxl').innerHTML = `${asAdmin ? `<p class="note" style="flex-basis:100%">Cancelarás esta reserva como administrador.${CORREOS ? ' Se avisará por correo al alumno y al investigador responsable.' : ''}</p>` : ''}<span style="margin-right:auto;font-size:14px">¿Liberar este horario?</span><button type="button" class="btn" data-close>No</button><button type="button" class="btn danger" id="dYes">Sí, cancelar</button>`;
     const yes = $('dYes'); yes.focus();
     yes.addEventListener('click', async () => {
       yes.disabled = true; yes.textContent = 'Cancelando…';
       try {
         await api(asAdmin ? {accion:'cancelar_admin', id} : {accion:'cancelar', id, token: own.t});
         delete mine[id]; saveMine();
-        closeModal(); toast('Reserva cancelada. Se avisó por correo.'); load();
+        closeModal(); toast(CORREOS ? 'Reserva cancelada. Se avisó por correo.' : 'Reserva cancelada.'); load();
       } catch(e){
         const de = $('dErr'); de.textContent = e.message; de.hidden = false;
         yes.disabled = false; yes.textContent = 'Sí, cancelar';
@@ -324,7 +346,7 @@ function openDetail(id){
   });
 }
 
-/* ---------- enlace de cancelación del correo (?cancelar=ID&t=TOKEN) ---------- */
+/* ---------- enlace de cancelación (?cancelar=ID&t=TOKEN) ---------- */
 async function handleCancelLink(){
   const p = new URLSearchParams(location.search);
   const id = p.get('cancelar'), t = p.get('t');
@@ -347,7 +369,7 @@ async function handleCancelLink(){
     try {
       await api({accion:'cancelar', id, token: t});
       delete mine[id]; saveMine();
-      openModal(`<div class="ok"><span class="ok-mark" aria-hidden="true">✓</span><h2 id="mTitle">Reserva cancelada</h2></div>${metaLine(r, b.date, b.start, b.end)}<p class="note">El horario quedó libre y se avisó por correo al alumno y al investigador responsable.</p><div class="actions"><button type="button" class="btn primary" data-close>Listo</button></div>`);
+      openModal(`<div class="ok"><span class="ok-mark" aria-hidden="true">✓</span><h2 id="mTitle">Reserva cancelada</h2></div>${metaLine(r, b.date, b.start, b.end)}<p class="note">El horario quedó libre.${CORREOS ? ' Se avisó por correo al alumno y al investigador responsable.' : ''}</p><div class="actions"><button type="button" class="btn primary" data-close>Listo</button></div>`);
       load();
     } catch(e){
       const le = $('lErr'); le.textContent = e.message; le.hidden = false;

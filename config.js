@@ -10,5 +10,7 @@
 // =====================================================================
 window.AGENDA_CONFIG = {
   supabaseUrl: 'https://ngagmlkomfxnqvabbhes.supabase.co',
-  supabaseKey: 'sb_publishable_bW9wdsEsUQehZamVVcIEbQ_GuJELB2t'
+  supabaseKey: 'sb_publishable_bW9wdsEsUQehZamVVcIEbQ_GuJELB2t',
+  // Cambia a true solo cuando configures el envío de correos (Brevo) en la función del servidor.
+  correos: false
 };

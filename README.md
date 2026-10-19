@@ -4,8 +4,10 @@ Sistema de reservas de los espacios comunes del **Laboratorio de Investigación 
 
 - Espacios: Lab 1, Lab 2, Lab 3, campana de flujo laminar y campana de extracción.
 - Horario: 8:00 a 22:00, bloques de 30 minutos, hora del centro de México. Primero en llegar, primero en reservar.
-- Cada reserva pide nombre, correo del alumno y correo del investigador responsable; ambos reciben un correo de confirmación.
-- Solo pueden cancelar **quien reservó** (desde el navegador donde reservó o con el enlace del correo) y los **administradores** (con inicio de sesión por correo). Ambos casos avisan por correo.
+- Cada reserva pide nombre, correo del alumno y correo del investigador responsable.
+- Al reservar, la persona recibe en pantalla un **enlace personal de cancelación** para copiar y guardar.
+- **Correos de confirmación: opcionales** (desactivados por ahora). Se activan con Brevo; ver "Activar correos más adelante".
+- Solo pueden cancelar **quien reservó** (desde el navegador donde reservó o con su enlace de cancelación) y los **administradores** (con inicio de sesión por correo).
 - Cupo: cada laboratorio admite hasta **3 personas a la vez**; las campanas son de **uso exclusivo**. La base de datos aplica el cupo aunque dos personas reserven en el mismo segundo.
 
 ## Cómo funciona
@@ -16,7 +18,7 @@ Sistema de reservas de los espacios comunes del **Laboratorio de Investigación 
 | `supabase/schema.sql` | Supabase (base de datos) | Tablas, reglas de cupo, permisos, lista de administradores |
 | `supabase/migracion-01-cupo-labs.sql` | Supabase (base de datos) | Solo si ejecutaste una versión anterior de `schema.sql`: cambia a cupo de 3 en labs |
 | `supabase/functions/reservas/index.ts` | Supabase (Edge Function) | Crea y cancela reservas, verifica administradores, envía correos |
-| Brevo | Servicio externo | Envía los correos (gratis hasta 300 al día) |
+| Brevo (opcional) | Servicio externo | Envía correos de confirmación (gratis hasta 300 al día) |
 
 La página solo puede **leer** reservas (sin el correo del alumno). Crear y cancelar pasa siempre por la función del servidor, así que nadie puede borrar reservas ajenas aunque modifique la página.
 
@@ -43,7 +45,7 @@ La página solo puede **leer** reservas (sin el correo del alumno). Crear y canc
 
 Los administradores entran con el botón *Acceso de administradores* al pie de la página: reciben un enlace en su correo y quedan con sesión iniciada en ese navegador.
 
-### 4. Correos (Brevo)
+### 4. Correos (Brevo) · OPCIONAL, sáltalo por ahora
 1. Crea una cuenta gratuita en <https://www.brevo.com>.
 2. **Senders, Domains & Dedicated IPs → Senders → Add a sender**: registra y verifica el correo desde el que saldrán las confirmaciones.
 3. **SMTP & API → API Keys → Generate a new API key**. Copia la clave.
@@ -54,7 +56,7 @@ Los administradores entran con el botón *Acceso de administradores* al pie de l
 1. En Supabase: **Edge Functions → Deploy a new function → Via Editor**.
 2. Nómbrala exactamente `reservas`, borra el código de ejemplo, pega `supabase/functions/reservas/index.ts` y pulsa **Deploy**.
 3. En los detalles de la función desactiva **Enforce JWT verification** (la función hace sus propias verificaciones).
-4. **Edge Functions → Secrets**, agrega:
+4. **Edge Functions → Secrets**: solo si activas los correos (paso 4). Sin secretos la agenda funciona sin correos. Agrega:
 
 | Nombre | Valor |
 |---|---|
@@ -76,10 +78,15 @@ En el canal del grupo: **+ (Agregar pestaña) → Sitio web**, pega la direcció
 
 ---
 
+## Activar correos más adelante
+1. Haz el paso 4 (Brevo) y agrega los secretos del paso 5.
+2. En `config.js` cambia `correos: false` por `correos: true` y sube el cambio.
+No hay que tocar la base de datos ni volver a desplegar la función.
+
 ## Prueba rápida
-1. Abre la página y reserva un horario con tu correo en ambos campos. Debe llegar la confirmación.
+1. Abre la página y reserva un horario. Copia el enlace de cancelación que aparece.
 2. Desde otro navegador (o ventana privada) toca esa reserva: no debe dejar cancelarla.
-3. Abre el enlace *Cancelar esta reserva* del correo: debe liberar el horario y mandar el aviso.
+3. Abre el enlace de cancelación en esa ventana privada: debe dejar cancelar y liberar el horario.
 4. Entra como administrador y cancela una reserva ajena.
 
 ## Mantenimiento

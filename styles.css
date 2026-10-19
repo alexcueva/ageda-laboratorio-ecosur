@@ -110,6 +110,8 @@ h1{margin:0;font-size:26px;font-weight:700;letter-spacing:-0.01em;text-wrap:bala
 .field label{font-size:13px;font-weight:600}
 .field small,.hint{color:var(--muted);font-size:12px}
 .field input,.field select{border:1px solid var(--line);border-radius:7px;padding:8px 10px;background:var(--surface-2);width:100%}
+.copyrow{display:flex;gap:8px}
+.copyrow input{flex:1;min-width:0;font-family:var(--mono);font-size:12px}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;align-items:center}
 dl{margin:0;display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;font-size:14px}
