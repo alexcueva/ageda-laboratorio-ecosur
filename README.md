@@ -6,14 +6,15 @@ Sistema de reservas de los espacios comunes del **Laboratorio de Investigación 
 - Horario: 8:00 a 22:00, bloques de 30 minutos, hora del centro de México. Primero en llegar, primero en reservar.
 - Cada reserva pide nombre, correo del alumno y correo del investigador responsable; ambos reciben un correo de confirmación.
 - Solo pueden cancelar **quien reservó** (desde el navegador donde reservó o con el enlace del correo) y los **administradores** (con inicio de sesión por correo). Ambos casos avisan por correo.
-- La base de datos impide dos reservas encimadas en el mismo espacio.
+- Cupo: cada laboratorio admite hasta **3 personas a la vez**; las campanas son de **uso exclusivo**. La base de datos aplica el cupo aunque dos personas reserven en el mismo segundo.
 
 ## Cómo funciona
 
 | Pieza | Dónde vive | Qué hace |
 |---|---|---|
 | `index.html`, `styles.css`, `app.js`, `config.js` | GitHub Pages | La página que ve todo el mundo |
-| `supabase/schema.sql` | Supabase (base de datos) | Tablas, regla de no traslape, permisos, lista de administradores |
+| `supabase/schema.sql` | Supabase (base de datos) | Tablas, reglas de cupo, permisos, lista de administradores |
+| `supabase/migracion-01-cupo-labs.sql` | Supabase (base de datos) | Solo si ejecutaste una versión anterior de `schema.sql`: cambia a cupo de 3 en labs |
 | `supabase/functions/reservas/index.ts` | Supabase (Edge Function) | Crea y cancela reservas, verifica administradores, envía correos |
 | Brevo | Servicio externo | Envía los correos (gratis hasta 300 al día) |
 
@@ -86,3 +87,4 @@ En el canal del grupo: **+ (Agregar pestaña) → Sitio web**, pega la direcció
 - **Historial**: las reservas canceladas no se borran; quedan con `cancelada_en` y `cancelada_por` en **Table Editor → reservas**.
 - **Proyecto en pausa**: Supabase gratuito pausa proyectos sin actividad por una semana. Con uso normal de la agenda no ocurre; si pasa, se reactiva desde el panel.
 - **Cambiar espacios u horario**: hay que editar la lista en `app.js`, en `index.ts` y la restricción `recurso in (...)` de `schema.sql`.
+- **Cambiar el cupo de los labs**: `cupo constant int := 3` en `schema.sql` (función `revisar_cupo_lab`), `CUPO_LAB` en `index.ts` y `cap` en `app.js`.

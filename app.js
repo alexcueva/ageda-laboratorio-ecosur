@@ -5,13 +5,15 @@
 'use strict';
 
 // Debe coincidir con supabase/schema.sql y con la función "reservas".
+// cap = reservas simultáneas permitidas (labs: 3 personas; campanas: uso exclusivo)
 const RES = [
-  {id:'lab1', name:'Lab 1', kind:'Laboratorio', c:'--r1'},
-  {id:'lab2', name:'Lab 2', kind:'Laboratorio', c:'--r2'},
-  {id:'lab3', name:'Lab 3', kind:'Laboratorio', c:'--r3'},
-  {id:'flujo', name:'Campana de flujo laminar', short:'Flujo laminar', kind:'Campana', c:'--r4'},
-  {id:'extraccion', name:'Campana de extracción', short:'Extracción', kind:'Campana', c:'--r5'}
+  {id:'lab1', name:'Lab 1', kind:'Laboratorio', c:'--r1', cap:3},
+  {id:'lab2', name:'Lab 2', kind:'Laboratorio', c:'--r2', cap:3},
+  {id:'lab3', name:'Lab 3', kind:'Laboratorio', c:'--r3', cap:3},
+  {id:'flujo', name:'Campana de flujo laminar', short:'Flujo laminar', kind:'Campana', c:'--r4', cap:1},
+  {id:'extraccion', name:'Campana de extracción', short:'Extracción', kind:'Campana', c:'--r5', cap:1}
 ];
+const capTxt = r => r.cap > 1 ? `hasta ${r.cap} a la vez` : 'uso exclusivo';
 const ZONA = 'America/Mexico_City', OFFSET = '-06:00';
 const OPEN = 8*60, CLOSE = 22*60, STEP = 30, NSLOT = (CLOSE-OPEN)/STEP;
 const MINE = 'agenda-ladici-mias', PREF = 'agenda-ladici-pref', DRAFT = 'agenda-ladici-datos';
@@ -80,7 +82,18 @@ const savePref = () => lsSet(PREF, {view: state.view, res: state.selRes});
 
 function weekDays(d){ const off = (d.getUTCDay() + 6) % 7; const mon = addDays(d, -off); return [...Array(7)].map((_, i) => addDays(mon, i)); }
 const columnDates = () => state.view === 'dia' ? [state.cur] : weekDays(state.cur);
-const list = (date, res) => state.rows.filter(b => b.date === date && b.res === res).sort((a,b) => a.start - b.start);
+const list = (date, res) => state.rows.filter(b => b.date === date && b.res === res).sort((a,b) => a.start - b.start || a.end - b.end);
+const occAt = (date, res, t) => list(date, res).filter(b => b.start <= t && b.end > t).length;
+// Reparte reservas encimadas en carriles (máximo = cupo del espacio).
+function withLanes(items){
+  const ends = [];
+  return items.map(b => {
+    let i = ends.findIndex(e => e <= b.start);
+    if (i < 0){ i = ends.length; ends.push(0); }
+    ends[i] = b.end;
+    return {b, lane: i};
+  });
+}
 
 function toRow(r){
   const a = mx(new Date(r.inicio)), b = mx(new Date(r.fin));
@@ -127,11 +140,11 @@ function render(){
   let cols;
   if (state.view === 'dia'){
     const k = dkey(state.cur), d = state.cur;
-    cols = RES.map(r => ({res: r, date: k, title: r.short || r.name, sub: r.kind}));
+    cols = RES.map(r => ({res: r, date: k, title: r.short || r.name, sub: `${r.kind} · ${capTxt(r)}`}));
     $('dateLabel').textContent = `${DIAS[d.getUTCDay()]} ${d.getUTCDate()} de ${MESES[d.getUTCMonth()]} de ${d.getUTCFullYear()}`;
   } else {
     const days = weekDays(state.cur), r = resById(state.selRes);
-    cols = days.map(d => ({res: r, date: dkey(d), title: `${DIAS_C[d.getUTCDay()]} ${d.getUTCDate()}`, sub: r.short || r.name}));
+    cols = days.map(d => ({res: r, date: dkey(d), title: `${DIAS_C[d.getUTCDay()]} ${d.getUTCDate()}`, sub: `${r.short || r.name} · ${capTxt(r)}`}));
     const a = days[0], b = days[6];
     $('dateLabel').textContent = a.getUTCMonth() === b.getUTCMonth()
       ? `${a.getUTCDate()}–${b.getUTCDate()} de ${MESES[a.getUTCMonth()]} de ${b.getUTCFullYear()}`
@@ -139,7 +152,8 @@ function render(){
     $('chips').innerHTML = RES.map(x => `<button type="button" class="chip" style="--rc:var(${x.c})" data-res="${x.id}" aria-pressed="${x.id === state.selRes}">${esc(x.name)}</button>`).join('');
   }
 
-  let h = `<div class="grid" style="--cols:${cols.length}"><div class="gh corner"></div>`;
+  const tracks = cols.map(c => c.res.cap > 1 ? 'minmax(180px, 1.6fr)' : 'minmax(118px, 1fr)').join(' ');
+  let h = `<div class="grid" style="grid-template-columns:54px ${tracks}"><div class="gh corner"></div>`;
   cols.forEach(c => {
     h += `<div class="gh${state.view === 'semana' && c.date === tk ? ' is-today' : ''}" style="--rc:var(${c.res.c})"><span class="gh-t">${esc(c.title)}</span><span class="gh-s">${esc(c.sub)}</span></div>`;
   });
@@ -147,16 +161,19 @@ function render(){
   for (let i = 0; i < NSLOT/2; i++) h += `<span style="top:calc(var(--row) * ${i*2})">${pad(8+i)}:00</span>`;
   h += `</div>`;
   cols.forEach(c => {
-    h += `<div class="col" style="--rc:var(${c.res.c})">`;
+    const cap = c.res.cap;
+    h += `<div class="col" style="--rc:var(${c.res.c});--cap:${cap}">`;
     for (let s = 0; s < NSLOT; s++){
       const st = OPEN + s*STEP, past = isPastSlot(c.date, st) || !sb;
-      h += `<button type="button" class="cell${s % 2 ? ' half' : ''}" data-res="${c.res.id}" data-date="${c.date}" data-start="${st}" data-label="${hm(st)}" ${past ? 'disabled' : ''} aria-label="Reservar ${esc(c.res.name)}, ${longDate(c.date)}, ${hm(st)}"></button>`;
+      const occ = occAt(c.date, c.res.id, st), full = occ >= cap;
+      const lbl = cap > 1 && occ ? `${hm(st)} · ${cap - occ} libre${cap - occ > 1 ? 's' : ''}` : hm(st);
+      h += `<button type="button" class="cell${s % 2 ? ' half' : ''}${full ? ' full' : ''}" data-res="${c.res.id}" data-date="${c.date}" data-start="${st}" data-label="${lbl}" ${past || full ? 'disabled' : ''} aria-label="${full ? 'Sin cupo' : 'Reservar'} ${esc(c.res.name)}, ${longDate(c.date)}, ${hm(st)}${cap > 1 ? `, ${occ} de ${cap} ocupados` : ''}"></button>`;
     }
-    list(c.date, c.res.id).forEach(b => {
+    withLanes(list(c.date, c.res.id)).forEach(({b, lane}) => {
       const s0 = Math.max(b.start, OPEN), s1 = Math.min(b.end, CLOSE);
       if (s1 <= s0) return;
       const top = (s0 - OPEN)/STEP, n = (s1 - s0)/STEP;
-      h += `<button type="button" class="bk${mine[b.id] ? ' mine' : ''}${n < 2 ? ' short' : ''}" data-id="${b.id}" style="top:calc(var(--row) * ${top} + 1px);height:calc(var(--row) * ${n} - 2px)" aria-label="${esc(b.nombre)}, ${hm(b.start)} a ${hm(b.end)}"><span class="bk-n">${esc(b.nombre)}</span><span class="bk-t">${hm(b.start)}–${hm(b.end)}</span></button>`;
+      h += `<button type="button" class="bk${mine[b.id] ? ' mine' : ''}${n < 2 ? ' short' : ''}" data-id="${b.id}" title="${esc(b.nombre)} · ${hm(b.start)}–${hm(b.end)}" style="--lane:${Math.min(lane, cap - 1)};top:calc(var(--row) * ${top} + 1px);height:calc(var(--row) * ${n} - 2px)" aria-label="${esc(b.nombre)}, ${hm(b.start)} a ${hm(b.end)}"><span class="bk-n">${esc(b.nombre)}</span><span class="bk-t">${hm(b.start)}–${hm(b.end)}</span></button>`;
     });
     if (c.date === tk){ const nm = nowMin(); if (nm >= OPEN && nm <= CLOSE) h += `<div class="now" style="top:calc(var(--row) * ${(nm - OPEN)/STEP})"></div>`; }
     h += `</div>`;
@@ -192,9 +209,16 @@ function toast(t){ const el = $('toast'); el.textContent = t; el.hidden = false;
 /* ---------- reservar ---------- */
 function openForm(resId, date, start){
   const r = resById(resId);
-  const nextB = list(date, resId).find(b => b.start > start);
-  const limit = nextB ? nextB.start : CLOSE;
+  // Se puede extender hasta el primer bloque sin cupo.
+  let limit = start + STEP;
+  for (let t = start; t < CLOSE; t += STEP){ if (occAt(date, resId, t) >= r.cap) break; limit = t + STEP; }
   const def = Math.min(start + 60, limit);
+  const occ = occAt(date, resId, start);
+  let hint = '';
+  if (r.cap > 1){
+    if (occ) hint = `Ya hay ${occ} de ${r.cap} personas en este laboratorio a las ${hm(start)}.`;
+    if (limit < CLOSE) hint += `${hint ? ' ' : ''}Se llena a las ${hm(limit)}.`;
+  } else if (limit < CLOSE) hint = `Siguiente reserva en este espacio a las ${hm(limit)}.`;
   let opts = '';
   for (let e = start + STEP; e <= limit; e += STEP){
     const dur = e - start, durTxt = dur < 60 ? `${dur} min` : `${Math.floor(dur/60)} h${dur % 60 ? ' 30 min' : ''}`;
@@ -209,7 +233,7 @@ function openForm(resId, date, start){
         <div class="field"><label for="fIni">Inicio</label><input id="fIni" value="${hm(start)}" disabled></div>
         <div class="field"><label for="fFin">Término</label><select id="fFin">${opts}</select></div>
       </div>
-      ${nextB ? `<span class="hint">Siguiente reserva en este espacio a las ${hm(nextB.start)}.</span>` : ''}
+      ${hint ? `<span class="hint">${hint}</span>` : ''}
       <div class="field"><label for="fNom">Nombre completo</label><input id="fNom" required maxlength="120" autocomplete="name" value="${esc(dr.nombre)}"></div>
       <div class="field"><label for="fAlu">Correo del alumno</label><input id="fAlu" type="email" required maxlength="200" autocomplete="email" value="${esc(dr.alumno)}"></div>
       <div class="field"><label for="fInv">Correo del investigador responsable</label><input id="fInv" type="email" required maxlength="200" value="${esc(dr.investigador)}"><small>Recibe copia de la confirmación.</small></div>

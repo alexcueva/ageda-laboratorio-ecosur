@@ -28,6 +28,7 @@ const RECURSOS: Record<string, string> = {
   extraccion: "Campana de extracción",
 };
 const ABRE = 8 * 60, CIERRA = 22 * 60, PASO = 30;
+const CUPO_LAB = 3; // debe coincidir con revisar_cupo_lab() en schema.sql
 const ZONA = "America/Mexico_City";
 const OFFSET = "-06:00"; // Centro de México: sin horario de verano desde 2022
 
@@ -131,6 +132,9 @@ async function crear(b: any) {
     .select("*").single();
   if (error) {
     if (error.code === "23P01") return fallo("Ese horario acaba de ser apartado por alguien más. La agenda se actualizó; elige otro.", 409);
+    if (error.code === "P0001" && /cupo_lleno/.test(error.message ?? "")) {
+      return fallo(`${RECURSOS[recurso]} ya tiene ${CUPO_LAB} reservas en parte de ese horario. La agenda se actualizó; elige otro horario u otro laboratorio.`, 409);
+    }
     if (error.code === "22008" || error.code === "22007") return fallo("Fecha no válida.");
     throw error;
   }
