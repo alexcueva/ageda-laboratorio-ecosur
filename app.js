@@ -201,8 +201,8 @@ function render(){
 
 function renderAdmin(){
   $('adminTag').hidden = !state.admin;
-  $('adminInfo').textContent = state.admin ? `Sesión de administrador: ${state.admin}` : '';
-  $('adminBtn').textContent = state.admin ? 'Cerrar sesión' : 'Acceso de administradores';
+  $('adminInfo').textContent = state.admin ? `Sesión de administración: ${state.admin}` : '';
+  $('adminBtn').textContent = state.admin ? 'Cerrar sesión' : 'Acceso de administración';
 }
 
 /* ---------- ventanas ---------- */
@@ -253,8 +253,8 @@ function openForm(resId, date, start){
       </div>
       ${hint ? `<span class="hint">${hint}</span>` : ''}
       <div class="field"><label for="fNom">Nombre completo</label><input id="fNom" required maxlength="120" autocomplete="name" value="${esc(dr.nombre)}"></div>
-      <div class="field"><label for="fAlu">Correo del alumno</label><input id="fAlu" type="email" required maxlength="200" autocomplete="email" value="${esc(dr.alumno)}"></div>
-      <div class="field"><label for="fInv">Correo del investigador responsable</label><input id="fInv" type="email" required maxlength="200" value="${esc(dr.investigador)}">${CORREOS ? '<small>Recibe copia de la confirmación.</small>' : ''}</div>
+      <div class="field"><label for="fAlu">Tu correo</label><input id="fAlu" type="email" required maxlength="200" autocomplete="email" value="${esc(dr.alumno)}"></div>
+      <div class="field"><label for="fInv">Correo de la persona investigadora responsable</label><input id="fInv" type="email" required maxlength="200" value="${esc(dr.investigador)}">${CORREOS ? '<small>Recibe copia de la confirmación.</small>' : ''}</div>
       <div class="field"><label for="fMot">Actividad <span style="font-weight:400;color:var(--muted)">(opcional)</span></label><input id="fMot" maxlength="200" placeholder="p. ej. extracción de ADN, digestión ácida"></div>
       <p class="err" id="fErr" hidden></p>
       <div class="actions"><button type="button" class="btn" data-close>Cancelar</button><button type="submit" class="btn primary" id="fGo">Reservar</button></div>
@@ -268,8 +268,8 @@ function openForm(resId, date, start){
     const fin = Number($('fFin').value), actividad = $('fMot').value.trim();
     let msg = '';
     if (nombre.length < 2) msg = 'Escribe tu nombre completo.';
-    else if (!emailOk(alumno)) msg = 'Revisa el correo del alumno; debe tener la forma nombre@dominio.mx.';
-    else if (!emailOk(investigador)) msg = 'Revisa el correo del investigador responsable.';
+    else if (!emailOk(alumno)) msg = 'Revisa tu correo; debe tener la forma nombre@dominio.mx.';
+    else if (!emailOk(investigador)) msg = 'Revisa el correo de la persona investigadora responsable.';
     if (msg){ err.textContent = msg; err.hidden = false; return; }
     go.disabled = true; go.textContent = 'Reservando…';
     try {
@@ -312,10 +312,10 @@ function openDetail(id){
     ${metaLine(r, b.date, b.start, b.end)}
     <dl>
       ${b.motivo ? `<dt>Actividad</dt><dd>${esc(b.motivo)}</dd>` : ''}
-      ${alumno ? `<dt>Alumno</dt><dd>${alumno}</dd>` : ''}
+      ${alumno ? `<dt>Correo</dt><dd>${alumno}</dd>` : ''}
       <dt>Responsable</dt><dd>${esc(b.investigador)}</dd>
     </dl>
-    ${!canCancel ? `<p class="note">Solo quien hizo la reserva o un administrador del laboratorio puede cancelarla. Quien reservó puede hacerlo desde su navegador o con su enlace de cancelación.</p><div class="actions"><button type="button" class="btn" data-close>Cerrar</button></div>`
+    ${!canCancel ? `<p class="note">Solo quien hizo la reserva o la administración del laboratorio puede cancelarla. Quien reservó puede hacerlo desde su navegador o con su enlace de cancelación.</p><div class="actions"><button type="button" class="btn" data-close>Cerrar</button></div>`
       : ended ? `<p class="note">Esta reserva ya terminó.</p><div class="actions"><button type="button" class="btn" data-close>Cerrar</button></div>`
       : `${own ? linkBox(id, own.t) : ''}<p class="err" id="dErr" hidden></p><div class="actions" id="cxl"><button type="button" class="btn" data-close>Cerrar</button><button type="button" class="btn" data-ask>Cancelar reserva</button></div>`}`);
   wireCopy();
@@ -329,7 +329,7 @@ function openDetail(id){
   if (!ask) return;
   ask.addEventListener('click', () => {
     const asAdmin = !own;
-    $('cxl').innerHTML = `${asAdmin ? `<p class="note" style="flex-basis:100%">Cancelarás esta reserva como administrador.${CORREOS ? ' Se avisará por correo al alumno y al investigador responsable.' : ''}</p>` : ''}<span style="margin-right:auto;font-size:14px">¿Liberar este horario?</span><button type="button" class="btn" data-close>No</button><button type="button" class="btn danger" id="dYes">Sí, cancelar</button>`;
+    $('cxl').innerHTML = `${asAdmin ? `<p class="note" style="flex-basis:100%">Cancelarás esta reserva con permisos de administración.${CORREOS ? ' Se avisará por correo a quien reservó y a la persona investigadora responsable.' : ''}</p>` : ''}<span style="margin-right:auto;font-size:14px">¿Liberar este horario?</span><button type="button" class="btn" data-close>No</button><button type="button" class="btn danger" id="dYes">Sí, cancelar</button>`;
     const yes = $('dYes'); yes.focus();
     yes.addEventListener('click', async () => {
       yes.disabled = true; yes.textContent = 'Cancelando…';
@@ -369,7 +369,7 @@ async function handleCancelLink(){
     try {
       await api({accion:'cancelar', id, token: t});
       delete mine[id]; saveMine();
-      openModal(`<div class="ok"><span class="ok-mark" aria-hidden="true">✓</span><h2 id="mTitle">Reserva cancelada</h2></div>${metaLine(r, b.date, b.start, b.end)}<p class="note">El horario quedó libre.${CORREOS ? ' Se avisó por correo al alumno y al investigador responsable.' : ''}</p><div class="actions"><button type="button" class="btn primary" data-close>Listo</button></div>`);
+      openModal(`<div class="ok"><span class="ok-mark" aria-hidden="true">✓</span><h2 id="mTitle">Reserva cancelada</h2></div>${metaLine(r, b.date, b.start, b.end)}<p class="note">El horario quedó libre.${CORREOS ? ' Se avisó por correo a quien reservó y a la persona investigadora responsable.' : ''}</p><div class="actions"><button type="button" class="btn primary" data-close>Listo</button></div>`);
       load();
     } catch(e){
       const le = $('lErr'); le.textContent = e.message; le.hidden = false;
@@ -381,8 +381,8 @@ async function handleCancelLink(){
 /* ---------- administradores ---------- */
 function openLogin(){
   openModal(`
-    <h2 id="mTitle">Acceso de administradores</h2>
-    <p class="note">Te enviaremos un enlace de acceso. Solo funciona con los correos registrados como administradores del laboratorio.</p>
+    <h2 id="mTitle">Acceso de administración</h2>
+    <p class="note">Te enviaremos un enlace de acceso. Solo funciona con los correos registrados para administrar el laboratorio.</p>
     <form id="fLog" class="stack" novalidate>
       <div class="field"><label for="lMail">Correo</label><input id="lMail" type="email" autocomplete="email" required></div>
       <p class="err" id="lgErr" hidden></p>
@@ -397,7 +397,7 @@ function openLogin(){
     const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname, shouldCreateUser: false } });
     if (error){
       err.textContent = /signup|not allowed|not found|user/i.test(error.message)
-        ? 'Ese correo no está registrado como administrador.'
+        ? 'Ese correo no está registrado para administrar el laboratorio.'
         : `No se pudo enviar el enlace: ${error.message}`;
       err.hidden = false; go.disabled = false; go.textContent = 'Enviar enlace';
       return;
@@ -412,11 +412,11 @@ async function checkAdmin(session){
   if (!error && data === true){
     const nuevo = !state.admin;
     state.admin = session.user.email;
-    if (nuevo) toast('Sesión de administrador iniciada');
+    if (nuevo) toast('Sesión de administración iniciada');
   } else {
     state.admin = null;
     await sb.auth.signOut();
-    toast('Ese correo no tiene permisos de administrador.');
+    toast('Ese correo no tiene permisos de administración.');
   }
   renderAdmin();
 }

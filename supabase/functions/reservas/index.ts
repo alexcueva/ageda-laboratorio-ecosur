@@ -130,9 +130,9 @@ async function crear(b: any) {
   const nombre = String(b.nombre ?? "").trim();
   if (nombre.length < 2 || nombre.length > 120) return fallo("Escribe tu nombre completo.");
   const correo_alumno = String(b.correo_alumno ?? "").trim().toLowerCase();
-  if (!correoOk(correo_alumno)) return fallo("Revisa el correo del alumno.");
+  if (!correoOk(correo_alumno)) return fallo("Revisa tu correo.");
   const correo_investigador = String(b.correo_investigador ?? "").trim().toLowerCase();
-  if (!correoOk(correo_investigador)) return fallo("Revisa el correo del investigador responsable.");
+  if (!correoOk(correo_investigador)) return fallo("Revisa el correo de la persona investigadora responsable.");
   const actividad = String(b.actividad ?? "").trim().slice(0, 200) || null;
 
   const inicio = marca(fecha, ini), termino = marca(fecha, fin);
@@ -218,7 +218,7 @@ async function cargarPorId(b: any): Promise<Reserva | null> {
 // deno-lint-ignore no-explicit-any
 async function cancelarAdmin(req: Request, b: any) {
   const admin = await correoAdmin(req);
-  if (!admin) return fallo("Tu sesión no tiene permisos de administrador. Vuelve a iniciar sesión.", 403);
+  if (!admin) return fallo("Tu sesión no tiene permisos de administración. Vuelve a iniciar sesión.", 403);
   const r = await cargarPorId(b);
   if (!r) return fallo("No encontramos esa reserva.", 404);
   const no = revisarCancelable(r); if (no) return no;
@@ -229,7 +229,7 @@ async function cancelarAdmin(req: Request, b: any) {
 
 // deno-lint-ignore no-explicit-any
 async function detalleAdmin(req: Request, b: any) {
-  if (!(await correoAdmin(req))) return fallo("Tu sesión no tiene permisos de administrador.", 403);
+  if (!(await correoAdmin(req))) return fallo("Tu sesión no tiene permisos de administración.", 403);
   const r = await cargarPorId(b);
   if (!r) return fallo("No encontramos esa reserva.", 404);
   return json({ correo_alumno: r.correo_alumno });
@@ -280,8 +280,8 @@ const filasReserva = (r: Reserva): [string, string][] => [
   ["Espacio", esc(RECURSOS[r.recurso] ?? r.recurso)],
   ["Fecha y hora", esc(cuando(r))],
   ["Reservó", esc(r.nombre)],
-  ["Alumno", esc(r.correo_alumno)],
-  ["Responsable", esc(r.correo_investigador)],
+  ["Correo de quien reservó", esc(r.correo_alumno)],
+  ["Persona investigadora responsable", esc(r.correo_investigador)],
   ...(r.actividad ? [["Actividad", esc(r.actividad)] as [string, string]] : []),
 ];
 
