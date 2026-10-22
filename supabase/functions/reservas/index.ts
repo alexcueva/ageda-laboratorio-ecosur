@@ -30,6 +30,8 @@ const RECURSOS: Record<string, string> = {
 };
 const ABRE = 8 * 60, CIERRA = 22 * 60, PASO = 30;
 const CUPO_LAB = 3; // debe coincidir con revisar_cupo_lab() en schema.sql
+const SERIE_MESES = 2;   // duración máxima de una reserva repetida
+const SERIE_MAX = 62;    // tope de fechas por serie
 const ZONA = "America/Mexico_City";
 const OFFSET = "-06:00"; // Centro de México: sin horario de verano desde 2022
 
@@ -77,6 +79,9 @@ Deno.serve(async (req) => {
   try {
     switch (b?.accion) {
       case "crear": return await crear(b);
+      case "crear_serie": return await crearSerie(b);
+      case "cancelar_serie": return await cancelarSerie(b);
+      case "cancelar_serie_admin": return await cancelarSerieAdmin(req, b);
       case "ver": return await ver(b);
       case "cancelar": return await cancelar(b);
       case "cancelar_admin": return await cancelarAdmin(req, b);
@@ -113,16 +118,17 @@ function enlaceCancelar(r: Reserva) {
 const publica = (r: Reserva) => ({
   id: r.id, recurso: r.recurso, inicio: r.inicio, fin: r.fin, nombre: r.nombre,
   actividad: r.actividad, correo_investigador: r.correo_investigador,
+  serie_id: r.serie_id ?? null,
   cancelada: !!r.cancelada_en, terminada: new Date(r.fin).getTime() <= Date.now(),
 });
 
 /* ---------------- acciones ---------------- */
 // deno-lint-ignore no-explicit-any
-async function crear(b: any) {
+type Datos = { recurso: string; ini: number; fin: number; nombre: string; correo_alumno: string; correo_investigador: string; actividad: string | null };
+// deno-lint-ignore no-explicit-any
+function validar(b: any): Datos | Response {
   const recurso = String(b.recurso ?? "");
   if (!RECURSOS[recurso]) return fallo("Espacio no válido.");
-  const fecha = String(b.fecha ?? "");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return fallo("Fecha no válida.");
   const ini = Number(b.inicio), fin = Number(b.fin);
   if (!Number.isInteger(ini) || !Number.isInteger(fin) || ini % PASO || fin % PASO || ini < ABRE || fin > CIERRA || fin <= ini) {
     return fallo("Horario no válido. Se reserva de 8:00 a 22:00 en bloques de 30 minutos.");
@@ -134,6 +140,17 @@ async function crear(b: any) {
   const correo_investigador = String(b.correo_investigador ?? "").trim().toLowerCase();
   if (!correoOk(correo_investigador)) return fallo("Revisa el correo de la persona investigadora responsable.");
   const actividad = String(b.actividad ?? "").trim().slice(0, 200) || null;
+  return { recurso, ini, fin, nombre, correo_alumno, correo_investigador, actividad };
+}
+
+const esFecha = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v + "T00:00:00Z"));
+
+// deno-lint-ignore no-explicit-any
+async function crear(b: any) {
+  const v = validar(b); if (v instanceof Response) return v;
+  const { recurso, ini, fin, nombre, correo_alumno, correo_investigador, actividad } = v;
+  const fecha = String(b.fecha ?? "");
+  if (!esFecha(fecha)) return fallo("Fecha no válida.");
 
   const inicio = marca(fecha, ini), termino = marca(fecha, fin);
   const t0 = new Date(inicio).getTime();
@@ -153,6 +170,49 @@ async function crear(b: any) {
   }
   const correo_enviado = await correoConfirmacion(data);
   return json({ id: data.id, token: data.token_cancelacion, correo_enviado });
+}
+
+// Reserva repetida: una reserva por fecha, ligadas por serie_id y con el mismo
+// token de cancelación. Las fechas ocupadas o sin cupo se omiten y se informan.
+// deno-lint-ignore no-explicit-any
+async function crearSerie(b: any) {
+  const v = validar(b); if (v instanceof Response) return v;
+  const { recurso, ini, fin, nombre, correo_alumno, correo_investigador, actividad } = v;
+  const desde = String(b.fecha_inicio ?? ""), hasta = String(b.fecha_fin ?? "");
+  if (!esFecha(desde) || !esFecha(hasta)) return fallo("Fechas no válidas.");
+  const dias = Array.isArray(b.dias) ? [...new Set(b.dias.map(Number))] : [];
+  if (!dias.length || dias.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) return fallo("Elige al menos un día de la semana.");
+  const t0 = Date.parse(desde + "T00:00:00Z"), t1 = Date.parse(hasta + "T00:00:00Z");
+  if (t1 < t0) return fallo("La fecha final debe ser posterior a la inicial.");
+  const lim = new Date(t0); lim.setUTCMonth(lim.getUTCMonth() + SERIE_MESES);
+  if (t1 > lim.getTime()) return fallo(`Una reserva repetida puede durar como máximo ${SERIE_MESES} meses.`);
+
+  const fechas: string[] = [];
+  for (let t = t0; t <= t1 && fechas.length < SERIE_MAX; t += 864e5) {
+    const d = new Date(t);
+    if (dias.includes(d.getUTCDay())) fechas.push(d.toISOString().slice(0, 10));
+  }
+  if (!fechas.length) return fallo("Ningún día elegido cae dentro de esas fechas.");
+
+  const serie_id = crypto.randomUUID(), token = crypto.randomUUID();
+  const creadas: { id: string; fecha: string }[] = [];
+  const omitidas: { fecha: string; motivo: string }[] = [];
+  for (const fecha of fechas) {
+    const inicio = marca(fecha, ini), termino = marca(fecha, fin);
+    if (new Date(inicio).getTime() + PASO * 60000 <= Date.now()) { omitidas.push({ fecha, motivo: "ya pasó" }); continue; }
+    const { data, error } = await db.from("reservas")
+      .insert({ recurso, inicio, fin: termino, nombre, correo_alumno, correo_investigador, actividad, serie_id, token_cancelacion: token })
+      .select("id").single();
+    if (error) {
+      if (error.code === "23P01") { omitidas.push({ fecha, motivo: "ocupado" }); continue; }
+      if (error.code === "P0001" && /cupo_lleno/.test(error.message ?? "")) { omitidas.push({ fecha, motivo: "sin cupo" }); continue; }
+      throw error;
+    }
+    creadas.push({ id: data.id, fecha });
+  }
+  if (!creadas.length) return json({ error: "Ninguna de esas fechas estaba disponible.", omitidas }, 409);
+  const correo_enviado = await correoSerie({ recurso, nombre, correo_alumno, correo_investigador, actividad, ini, fin }, creadas, omitidas, creadas[0].id, token);
+  return json({ serie_id, token, creadas, omitidas, correo_enviado });
 }
 
 // deno-lint-ignore no-explicit-any
@@ -193,6 +253,40 @@ async function cancelar(b: any) {
   if (!(await marcarCancelada(r, "propietario"))) return fallo("Esta reserva ya estaba cancelada.", 409);
   await correoCancelacion(r, null);
   return json({ ok: true });
+}
+
+async function cancelarFuturasDeSerie(serie_id: string, por: string, token?: string) {
+  let q = db.from("reservas")
+    .update({ cancelada_en: new Date().toISOString(), cancelada_por: por })
+    .eq("serie_id", serie_id).is("cancelada_en", null).gt("fin", new Date().toISOString());
+  if (token) q = q.eq("token_cancelacion", token);
+  const { data, error } = await q.select("*");
+  if (error) throw error;
+  return (data ?? []) as Reserva[];
+}
+
+// deno-lint-ignore no-explicit-any
+async function cancelarSerie(b: any) {
+  const r = await porToken(b);
+  if (!r) return fallo("No encontramos esa reserva. Revisa que el enlace esté completo.", 404);
+  if (!r.serie_id) return fallo("Esta reserva no forma parte de una serie.");
+  const hechas = await cancelarFuturasDeSerie(r.serie_id, "propietario", r.token_cancelacion);
+  if (!hechas.length) return fallo("No quedan fechas pendientes en esta serie.", 409);
+  await correoCancelacionSerie(hechas, null);
+  return json({ ok: true, canceladas: hechas.length });
+}
+
+// deno-lint-ignore no-explicit-any
+async function cancelarSerieAdmin(req: Request, b: any) {
+  const admin = await correoAdmin(req);
+  if (!admin) return fallo("Tu sesión no tiene permisos de administración. Vuelve a iniciar sesión.", 403);
+  const r = await cargarPorId(b);
+  if (!r) return fallo("No encontramos esa reserva.", 404);
+  if (!r.serie_id) return fallo("Esta reserva no forma parte de una serie.");
+  const hechas = await cancelarFuturasDeSerie(r.serie_id, `admin:${admin}`);
+  if (!hechas.length) return fallo("No quedan fechas pendientes en esta serie.", 409);
+  await correoCancelacionSerie(hechas, admin);
+  return json({ ok: true, canceladas: hechas.length });
 }
 
 async function correoAdmin(req: Request): Promise<string | null> {
@@ -308,4 +402,33 @@ function correoCancelacion(r: Reserva, admin: string | null) {
     `Reserva cancelada · ${RECURSOS[r.recurso]} · ${cuando(r)}`,
     plantilla("Reserva cancelada", filasReserva(r), pie),
   );
+}
+
+const fCorta = new Intl.DateTimeFormat("es-MX", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" });
+const hm = (m: number) => `${Math.floor(m / 60)}:${pad(m % 60)}`;
+
+// deno-lint-ignore no-explicit-any
+function correoSerie(d: any, creadas: { fecha: string }[], omitidas: { fecha: string; motivo: string }[], id: string, token: string) {
+  const lista = creadas.map((c) => fCorta.format(new Date(c.fecha + "T12:00:00Z"))).join(", ");
+  const filas: [string, string][] = [
+    ["Espacio", esc(RECURSOS[d.recurso])],
+    ["Horario", `${hm(d.ini)} a ${hm(d.fin)}`],
+    [`Fechas (${creadas.length})`, esc(lista)],
+    ["Reservó", esc(d.nombre)],
+    ["Correo", esc(d.correo_alumno)],
+    ["Persona investigadora responsable", esc(d.correo_investigador)],
+  ];
+  if (omitidas.length) filas.push(["No reservadas", esc(omitidas.map((o) => `${fCorta.format(new Date(o.fecha + "T12:00:00Z"))} (${o.motivo})`).join(", "))]);
+  const link = enlaceCancelar({ id, token_cancelacion: token });
+  const pie = link ? `<p style="margin:0"><a href="${esc(link)}">Cancelar una fecha o la serie completa</a></p>` : "";
+  return enviar([d.correo_alumno, d.correo_investigador], `Reserva repetida confirmada · ${RECURSOS[d.recurso]}`, plantilla("Reserva repetida confirmada", filas, pie));
+}
+
+function correoCancelacionSerie(rs: Reserva[], admin: string | null) {
+  const r = rs[0];
+  const pie = admin
+    ? `<p style="margin:0">La serie fue cancelada por la administración del laboratorio (${esc(admin)}).</p>`
+    : `<p style="margin:0">La serie fue cancelada desde el enlace de cancelación. Los horarios quedaron libres.</p>`;
+  return enviar([r.correo_alumno, r.correo_investigador], `Reserva repetida cancelada · ${RECURSOS[r.recurso]}`,
+    plantilla("Reserva repetida cancelada", [["Espacio", esc(RECURSOS[r.recurso])], ["Fechas canceladas", String(rs.length)], ["Reservó", esc(r.nombre)]], pie));
 }

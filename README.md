@@ -8,6 +8,7 @@ Sistema de reservas de los espacios comunes del **Laboratorio de Investigación 
 - Al reservar, la persona recibe en pantalla un **enlace personal de cancelación** para copiar y guardar.
 - **Correos de confirmación: opcionales** (desactivados por ahora). Se activan con Brevo; ver "Activar correos más adelante".
 - Solo pueden cancelar **quien reservó** (desde el navegador donde reservó o con su enlace de cancelación) y los **administradores** (con inicio de sesión por correo).
+- **Reservas repetidas:** al reservar se puede marcar *Repetir cada semana*, elegir uno o varios días y una fecha final (máximo 2 meses). Las fechas ocupadas o sin cupo se omiten y se avisa cuáles. Se cancela una fecha o toda la serie.
 - Cupo: cada laboratorio admite hasta **3 personas a la vez**; las campanas son de **uso exclusivo**. La base de datos aplica el cupo aunque dos personas reserven en el mismo segundo.
 
 ## Cómo funciona
@@ -17,6 +18,7 @@ Sistema de reservas de los espacios comunes del **Laboratorio de Investigación 
 | `index.html`, `styles.css`, `app.js`, `config.js` | GitHub Pages | La página que ve todo el mundo |
 | `supabase/schema.sql` | Supabase (base de datos) | Tablas, reglas de cupo, permisos, lista de administradores |
 | `supabase/migracion-01-cupo-labs.sql` | Supabase (base de datos) | Solo si ejecutaste una versión anterior de `schema.sql`: cambia a cupo de 3 en labs |
+| `supabase/migracion-02-series.sql` | Supabase (base de datos) | Solo si ejecutaste `schema.sql` antes del 22 oct 2026: agrega las reservas repetidas |
 | `supabase/functions/reservas/index.ts` | Supabase (Edge Function) | Crea y cancela reservas, verifica administradores, envía correos |
 | Brevo (opcional) | Servicio externo | Envía correos de confirmación (gratis hasta 300 al día) |
 

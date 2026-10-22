@@ -16,6 +16,7 @@ const RES = [
 const capTxt = r => r.cap > 1 ? `hasta ${r.cap} a la vez` : 'uso exclusivo';
 const ZONA = 'America/Mexico_City', OFFSET = '-06:00';
 const OPEN = 8*60, CLOSE = 22*60, STEP = 30, NSLOT = (CLOSE-OPEN)/STEP;
+const SERIE_MESES = 2;   // debe coincidir con la función del servidor
 const MINE = 'agenda-ladici-mias', PREF = 'agenda-ladici-pref', DRAFT = 'agenda-ladici-datos';
 
 /* ---------- utilidades de fecha (todo en hora del centro de México) ---------- */
@@ -116,7 +117,7 @@ function withLanes(items){
 function toRow(r){
   const a = mx(new Date(r.inicio)), b = mx(new Date(r.fin));
   return {id: r.id, res: r.recurso, date: a.key, start: a.min, end: b.key === a.key ? b.min : CLOSE,
-          nombre: r.nombre, motivo: r.actividad || '', investigador: r.correo_investigador};
+          nombre: r.nombre, motivo: r.actividad || '', investigador: r.correo_investigador, serie: r.serie_id || null};
 }
 
 let seq = 0;
@@ -127,7 +128,7 @@ async function load(){
   const my = ++seq;
   state.loading = true; renderStatus();
   const { data, error } = await sb.from('reservas')
-    .select('id,recurso,inicio,fin,nombre,actividad,correo_investigador')
+    .select('id,recurso,inicio,fin,nombre,actividad,correo_investigador,serie_id')
     .gte('inicio', `${from}T00:00:00${OFFSET}`)
     .lt('inicio', `${to}T00:00:00${OFFSET}`)
     .order('inicio');
@@ -191,7 +192,7 @@ function render(){
       const s0 = Math.max(b.start, OPEN), s1 = Math.min(b.end, CLOSE);
       if (s1 <= s0) return;
       const top = (s0 - OPEN)/STEP, n = (s1 - s0)/STEP;
-      h += `<button type="button" class="bk${mine[b.id] ? ' mine' : ''}${n < 2 ? ' short' : ''}" data-id="${b.id}" title="${esc(b.nombre)} · ${hm(b.start)}–${hm(b.end)}" style="--lane:${Math.min(lane, cap - 1)};top:calc(var(--row) * ${top} + 1px);height:calc(var(--row) * ${n} - 2px)" aria-label="${esc(b.nombre)}, ${hm(b.start)} a ${hm(b.end)}"><span class="bk-n">${esc(b.nombre)}</span><span class="bk-t">${hm(b.start)}–${hm(b.end)}</span></button>`;
+      h += `<button type="button" class="bk${mine[b.id] ? ' mine' : ''}${n < 2 ? ' short' : ''}" data-id="${b.id}" title="${esc(b.nombre)} · ${hm(b.start)}–${hm(b.end)}" style="--lane:${Math.min(lane, cap - 1)};top:calc(var(--row) * ${top} + 1px);height:calc(var(--row) * ${n} - 2px)" aria-label="${esc(b.nombre)}, ${hm(b.start)} a ${hm(b.end)}"><span class="bk-n">${esc(b.nombre)}</span><span class="bk-t">${b.serie ? '<span class="rep-ic" title="Reserva repetida">↻</span> ' : ''}${hm(b.start)}–${hm(b.end)}</span></button>`;
     });
     if (c.date === tk){ const nm = nowMin(); if (nm >= OPEN && nm <= CLOSE) h += `<div class="now" style="top:calc(var(--row) * ${(nm - OPEN)/STEP})"></div>`; }
     h += `</div>`;
@@ -243,6 +244,9 @@ function openForm(resId, date, start){
     opts += `<option value="${e}"${e === def ? ' selected' : ''}>${hm(e)} (${durTxt})</option>`;
   }
   const dr = lsGet(DRAFT, {});
+  const d0 = fromKey(date), wd = d0.getUTCDay();
+  const maxSerie = dkey(new Date(Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth() + SERIE_MESES, d0.getUTCDate())));
+  const defHasta = dkey(addDays(d0, 27)) < maxSerie ? dkey(addDays(d0, 27)) : maxSerie;
   openModal(`
     <h2 id="mTitle">Nueva reserva</h2>
     ${metaLine(r, date)}
@@ -252,6 +256,13 @@ function openForm(resId, date, start){
         <div class="field"><label for="fFin">Término</label><select id="fFin">${opts}</select></div>
       </div>
       ${hint ? `<span class="hint">${hint}</span>` : ''}
+      <label class="check"><input type="checkbox" id="fRep"> Repetir cada semana</label>
+      <div id="repBox" class="repbox" hidden>
+        <div class="field"><span class="lbl">Días de la semana</span>
+          <div class="days">${[1,2,3,4,5,6,0].map(d => `<label class="day"><input type="checkbox" value="${d}"${d === wd ? ' checked disabled' : ''}><span>${DIAS_C[d]}</span></label>`).join('')}</div></div>
+        <div class="field"><label for="fHasta">Hasta</label><input type="date" id="fHasta" min="${date}" max="${maxSerie}" value="${defHasta}"></div>
+        <small class="hint" id="repInfo"></small>
+      </div>
       <div class="field"><label for="fNom">Nombre completo</label><input id="fNom" required maxlength="120" autocomplete="name" value="${esc(dr.nombre)}"></div>
       <div class="field"><label for="fAlu">Tu correo</label><input id="fAlu" type="email" required maxlength="200" autocomplete="email" value="${esc(dr.alumno)}"></div>
       <div class="field"><label for="fInv">Correo de la persona investigadora responsable</label><input id="fInv" type="email" required maxlength="200" value="${esc(dr.investigador)}">${CORREOS ? '<small>Recibe copia de la confirmación.</small>' : ''}</div>
@@ -260,6 +271,24 @@ function openForm(resId, date, start){
       <div class="actions"><button type="button" class="btn" data-close>Cancelar</button><button type="submit" class="btn primary" id="fGo">Reservar</button></div>
     </form>`);
   setTimeout(() => (dr.nombre ? $('fFin') : $('fNom')).focus(), 0);
+
+  // Reserva repetida: días elegidos + fecha final (máximo SERIE_MESES meses).
+  const repDays = () => [...modal.querySelectorAll('.days input:checked')].map(x => Number(x.value));
+  const repDates = () => {
+    const h = $('fHasta').value, ds = repDays(), out = [];
+    if (!h || h < date || h > maxSerie) return out;
+    for (let d = d0; dkey(d) <= h; d = addDays(d, 1)) if (ds.includes(d.getUTCDay())) out.push(dkey(d));
+    return out;
+  };
+  const repSync = () => {
+    const on = $('fRep').checked; $('repBox').hidden = !on;
+    const n = on ? repDates().length : 1;
+    $('repInfo').textContent = `${n} fecha${n === 1 ? '' : 's'}. Máximo ${SERIE_MESES} meses; si alguna fecha está ocupada o sin cupo, se omite y te avisamos.`;
+    $('fGo').textContent = on ? `Reservar ${n} fecha${n === 1 ? '' : 's'}` : 'Reservar';
+  };
+  $('fRep').addEventListener('change', repSync);
+  $('repBox').addEventListener('change', repSync);
+  $('fHasta').addEventListener('input', repSync);
 
   $('fRes').addEventListener('submit', async ev => {
     ev.preventDefault();
@@ -270,8 +299,30 @@ function openForm(resId, date, start){
     if (nombre.length < 2) msg = 'Escribe tu nombre completo.';
     else if (!emailOk(alumno)) msg = 'Revisa tu correo; debe tener la forma nombre@dominio.mx.';
     else if (!emailOk(investigador)) msg = 'Revisa el correo de la persona investigadora responsable.';
+    const repetir = $('fRep').checked;
+    if (!msg && repetir){
+      const h = $('fHasta').value;
+      if (!h || h < date) msg = 'Elige una fecha final igual o posterior a la de inicio.';
+      else if (h > maxSerie) msg = `Una reserva repetida puede durar como máximo ${SERIE_MESES} meses (hasta el ${longDate(maxSerie)}).`;
+      else if (!repDates().length) msg = 'Ningún día elegido cae dentro de esas fechas.';
+    }
     if (msg){ err.textContent = msg; err.hidden = false; return; }
+    const goTxt = go.textContent;
     go.disabled = true; go.textContent = 'Reservando…';
+    if (repetir){
+      try {
+        const res = await api({accion:'crear_serie', recurso: resId, fecha_inicio: date, fecha_fin: $('fHasta').value, dias: repDays(), inicio: start, fin, nombre, correo_alumno: alumno, correo_investigador: investigador, actividad});
+        res.creadas.forEach(c => { mine[c.id] = {t: res.token, a: alumno.toLowerCase(), s: res.serie_id}; });
+        saveMine(); lsSet(DRAFT, {nombre, alumno, investigador});
+        showSerieConfirm(r, start, fin, nombre, res);
+        load();
+      } catch(e){
+        err.textContent = e.message; err.hidden = false;
+        go.disabled = false; go.textContent = goTxt;
+        if (e.status === 409) load();
+      }
+      return;
+    }
     try {
       const res = await api({accion:'crear', recurso: resId, fecha: date, inicio: start, fin, nombre, correo_alumno: alumno, correo_investigador: investigador, actividad});
       mine[res.id] = {t: res.token, a: alumno.toLowerCase()}; saveMine();
@@ -301,6 +352,22 @@ function showConfirm(b, enviado){
   wireCopy();
 }
 
+const fechaCorta = k => { const d = fromKey(k); return `${DIAS_C[d.getUTCDay()]} ${d.getUTCDate()} ${MESES[d.getUTCMonth()].slice(0, 3)}`; };
+
+function showSerieConfirm(r, start, end, nombre, res){
+  const motivoTxt = {'ocupado': 'ocupado', 'sin cupo': 'sin cupo', 'ya pasó': 'ya pasó'};
+  openModal(`
+    <div class="ok"><span class="ok-mark" aria-hidden="true">✓</span><h2 id="mTitle">Reserva repetida confirmada</h2></div>
+    <div class="meta" style="--rc:var(${r.c})"><i class="dot"></i><strong>${esc(r.name)}</strong><span>${hm(start)}–${hm(end)}</span><span>${esc(nombre)}</span></div>
+    <div class="field"><span class="lbl">Se reservaron ${res.creadas.length} fecha${res.creadas.length === 1 ? '' : 's'}</span>
+      <div class="datelist">${res.creadas.map(c => `<span class="dchip">${fechaCorta(c.fecha)}</span>`).join('')}</div></div>
+    ${res.omitidas.length ? `<div class="note warn"><strong>No se reservaron ${res.omitidas.length}:</strong> ${res.omitidas.map(o => `${fechaCorta(o.fecha)} (${motivoTxt[o.motivo] || o.motivo})`).join(', ')}.</div>` : ''}
+    ${linkBox(res.creadas[0].id, res.token)}
+    <p class="note">Con ese enlace puedes cancelar una fecha o todas las pendientes de la serie, desde cualquier dispositivo. También puedes hacerlo desde este navegador.</p>
+    <div class="actions"><button type="button" class="btn primary" data-close>Listo</button></div>`);
+  wireCopy();
+}
+
 /* ---------- detalle y cancelación ---------- */
 function openDetail(id){
   const b = state.rows.find(x => x.id === id); if (!b) return;
@@ -314,10 +381,11 @@ function openDetail(id){
       ${b.motivo ? `<dt>Actividad</dt><dd>${esc(b.motivo)}</dd>` : ''}
       ${alumno ? `<dt>Correo</dt><dd>${alumno}</dd>` : ''}
       <dt>Responsable</dt><dd>${esc(b.investigador)}</dd>
+      ${b.serie ? `<dt>Repetición</dt><dd>Forma parte de una reserva repetida</dd>` : ''}
     </dl>
     ${!canCancel ? `<p class="note">Solo quien hizo la reserva o la administración del laboratorio puede cancelarla. Quien reservó puede hacerlo desde su navegador o con su enlace de cancelación.</p><div class="actions"><button type="button" class="btn" data-close>Cerrar</button></div>`
       : ended ? `<p class="note">Esta reserva ya terminó.</p><div class="actions"><button type="button" class="btn" data-close>Cerrar</button></div>`
-      : `${own ? linkBox(id, own.t) : ''}<p class="err" id="dErr" hidden></p><div class="actions" id="cxl"><button type="button" class="btn" data-close>Cerrar</button><button type="button" class="btn" data-ask>Cancelar reserva</button></div>`}`);
+      : `${own ? linkBox(id, own.t) : ''}<p class="err" id="dErr" hidden></p><div class="actions" id="cxl"><button type="button" class="btn" data-close>Cerrar</button>${b.serie ? '<button type="button" class="btn" data-ask="serie">Cancelar toda la serie</button>' : ''}<button type="button" class="btn" data-ask="uno">${b.serie ? 'Cancelar este día' : 'Cancelar reserva'}</button></div>`}`);
   wireCopy();
 
   if (state.admin && !(own && own.a)){
@@ -325,25 +393,29 @@ function openDetail(id){
       .catch(() => { const el = $('dAlu'); if (el) el.textContent = 'No disponible'; });
   }
 
-  const ask = modal.querySelector('[data-ask]');
-  if (!ask) return;
-  ask.addEventListener('click', () => {
-    const asAdmin = !own;
-    $('cxl').innerHTML = `${asAdmin ? `<p class="note" style="flex-basis:100%">Cancelarás esta reserva con permisos de administración.${CORREOS ? ' Se avisará por correo a quien reservó y a la persona investigadora responsable.' : ''}</p>` : ''}<span style="margin-right:auto;font-size:14px">¿Liberar este horario?</span><button type="button" class="btn" data-close>No</button><button type="button" class="btn danger" id="dYes">Sí, cancelar</button>`;
+  modal.querySelectorAll('[data-ask]').forEach(ask => ask.addEventListener('click', () => {
+    const asAdmin = !own, serie = ask.dataset.ask === 'serie';
+    const pregunta = serie ? '¿Cancelar todas las fechas pendientes de la serie?' : '¿Liberar este horario?';
+    $('cxl').innerHTML = `${asAdmin ? `<p class="note" style="flex-basis:100%">Cancelarás ${serie ? 'esta serie' : 'esta reserva'} con permisos de administración.${CORREOS ? ' Se avisará por correo a quien reservó y a la persona investigadora responsable.' : ''}</p>` : ''}<span style="margin-right:auto;font-size:14px">${pregunta}</span><button type="button" class="btn" data-close>No</button><button type="button" class="btn danger" id="dYes">Sí, cancelar</button>`;
     const yes = $('dYes'); yes.focus();
     yes.addEventListener('click', async () => {
       yes.disabled = true; yes.textContent = 'Cancelando…';
       try {
-        await api(asAdmin ? {accion:'cancelar_admin', id} : {accion:'cancelar', id, token: own.t});
+        const body = serie
+          ? (asAdmin ? {accion:'cancelar_serie_admin', id} : {accion:'cancelar_serie', id, token: own.t})
+          : (asAdmin ? {accion:'cancelar_admin', id} : {accion:'cancelar', id, token: own.t});
+        const out = await api(body);
+        if (serie){ Object.keys(mine).forEach(k => { if (mine[k].s && mine[k].s === b.serie) delete mine[k]; }); }
         delete mine[id]; saveMine();
-        closeModal(); toast(CORREOS ? 'Reserva cancelada. Se avisó por correo.' : 'Reserva cancelada.'); load();
+        const txt = serie ? `Se cancelaron ${out.canceladas} fecha${out.canceladas === 1 ? '' : 's'}.` : 'Reserva cancelada.';
+        closeModal(); toast(CORREOS ? `${txt} Se avisó por correo.` : txt); load();
       } catch(e){
         const de = $('dErr'); de.textContent = e.message; de.hidden = false;
         yes.disabled = false; yes.textContent = 'Sí, cancelar';
         if (e.status === 409 || e.status === 404){ delete mine[id]; saveMine(); load(); }
       }
     });
-  });
+  }));
 }
 
 /* ---------- enlace de cancelación (?cancelar=ID&t=TOKEN) ---------- */
@@ -362,20 +434,23 @@ async function handleCancelLink(){
     openModal(`${head}<p class="note">${rv.cancelada ? 'Esta reserva ya estaba cancelada.' : 'Esta reserva ya terminó.'}</p><div class="actions"><button type="button" class="btn" data-close>Cerrar</button></div>`);
     return;
   }
-  openModal(`${head}<p class="err" id="lErr" hidden></p><div class="actions"><button type="button" class="btn" data-close>Conservar reserva</button><button type="button" class="btn danger" id="lYes">Sí, cancelar</button></div>`);
-  const yes = $('lYes');
-  yes.addEventListener('click', async () => {
-    yes.disabled = true; yes.textContent = 'Cancelando…';
+  const esSerie = !!rv.serie_id;
+  openModal(`${head}${esSerie ? '<p class="note">Esta reserva forma parte de una reserva repetida. Puedes cancelar solo esta fecha o todas las fechas pendientes.</p>' : ''}<p class="err" id="lErr" hidden></p><div class="actions"><button type="button" class="btn" data-close>Conservar</button>${esSerie ? '<button type="button" class="btn danger" data-l="serie">Cancelar toda la serie</button>' : ''}<button type="button" class="btn danger" data-l="uno">${esSerie ? 'Cancelar solo esta fecha' : 'Sí, cancelar'}</button></div>`);
+  modal.querySelectorAll('[data-l]').forEach(yes => yes.addEventListener('click', async () => {
+    const serie = yes.dataset.l === 'serie', txt0 = yes.textContent;
+    modal.querySelectorAll('[data-l]').forEach(x => x.disabled = true); yes.textContent = 'Cancelando…';
     try {
-      await api({accion:'cancelar', id, token: t});
+      const out = await api({accion: serie ? 'cancelar_serie' : 'cancelar', id, token: t});
+      if (serie) Object.keys(mine).forEach(k => { if (mine[k].s === rv.serie_id) delete mine[k]; });
       delete mine[id]; saveMine();
-      openModal(`<div class="ok"><span class="ok-mark" aria-hidden="true">✓</span><h2 id="mTitle">Reserva cancelada</h2></div>${metaLine(r, b.date, b.start, b.end)}<p class="note">El horario quedó libre.${CORREOS ? ' Se avisó por correo a quien reservó y a la persona investigadora responsable.' : ''}</p><div class="actions"><button type="button" class="btn primary" data-close>Listo</button></div>`);
+      const titulo = serie ? `Se cancelaron ${out.canceladas} fecha${out.canceladas === 1 ? '' : 's'}` : 'Reserva cancelada';
+      openModal(`<div class="ok"><span class="ok-mark" aria-hidden="true">✓</span><h2 id="mTitle">${titulo}</h2></div>${metaLine(r, b.date, b.start, b.end)}<p class="note">${serie ? 'Los horarios quedaron libres.' : 'El horario quedó libre.'}${CORREOS ? ' Se avisó por correo a quien reservó y a la persona investigadora responsable.' : ''}</p><div class="actions"><button type="button" class="btn primary" data-close>Listo</button></div>`);
       load();
     } catch(e){
       const le = $('lErr'); le.textContent = e.message; le.hidden = false;
-      yes.disabled = false; yes.textContent = 'Sí, cancelar';
+      modal.querySelectorAll('[data-l]').forEach(x => x.disabled = false); yes.textContent = txt0;
     }
-  });
+  }));
 }
 
 /* ---------- administradores ---------- */

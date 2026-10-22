@@ -26,10 +26,12 @@ create table if not exists public.reservas (
   creada_en           timestamptz not null default now(),
   cancelada_en        timestamptz,
   cancelada_por       text,
+  serie_id            uuid,
   constraint fin_despues_de_inicio check (fin > inicio)
 );
 
 create index if not exists reservas_inicio_idx on public.reservas (inicio);
+create index if not exists reservas_serie_idx on public.reservas (serie_id) where serie_id is not null;
 
 -- ---------------------------------------------------------------------
 -- 1b. Cupo por espacio (la base de datos lo aplica aunque dos personas
@@ -118,7 +120,7 @@ grant usage on schema public to anon, authenticated, service_role;
 grant all on public.reservas to service_role;
 grant all on public.administradores to service_role;
 
-grant select (id, recurso, inicio, fin, nombre, actividad, correo_investigador)
+grant select (id, recurso, inicio, fin, nombre, actividad, correo_investigador, serie_id)
   on public.reservas to anon, authenticated;
 
 drop policy if exists "lectura de reservas activas" on public.reservas;
