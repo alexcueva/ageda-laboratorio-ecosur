@@ -244,6 +244,7 @@ function openForm(resId, date, start){
     opts += `<option value="${e}"${e === def ? ' selected' : ''}>${hm(e)} (${durTxt})</option>`;
   }
   const dr = lsGet(DRAFT, {});
+  const fin0 = def;
   const d0 = fromKey(date), wd = d0.getUTCDay();
   const maxSerie = dkey(new Date(Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth() + SERIE_MESES, d0.getUTCDate())));
   const defHasta = dkey(addDays(d0, 27)) < maxSerie ? dkey(addDays(d0, 27)) : maxSerie;
@@ -256,6 +257,7 @@ function openForm(resId, date, start){
         <div class="field"><label for="fFin">Término</label><select id="fFin">${opts}</select></div>
       </div>
       ${hint ? `<span class="hint">${hint}</span>` : ''}
+      <p class="note warn" id="fTarde"${fin0 > 17*60 ? '' : ' hidden'}>Después de las 17:00 solo se trabaja en compañía de una persona académica o técnica responsable. Por seguridad y por el transporte público, se recomienda trabajar temprano.</p>
       <label class="check"><input type="checkbox" id="fRep"> Repetir cada semana</label>
       <div id="repBox" class="repbox" hidden>
         <div class="field"><span class="lbl">Días de la semana</span>
@@ -265,7 +267,7 @@ function openForm(resId, date, start){
       </div>
       <div class="field"><label for="fNom">Nombre completo</label><input id="fNom" required maxlength="120" autocomplete="name" value="${esc(dr.nombre)}"></div>
       <div class="field"><label for="fAlu">Tu correo</label><input id="fAlu" type="email" required maxlength="200" autocomplete="email" value="${esc(dr.alumno)}"></div>
-      <div class="field"><label for="fInv">Correo de la persona investigadora responsable</label><input id="fInv" type="email" required maxlength="200" value="${esc(dr.investigador)}">${CORREOS ? '<small>Recibe copia de la confirmación.</small>' : ''}</div>
+      <div class="field"><label for="fInv">Correo de la persona académica responsable</label><input id="fInv" type="email" required maxlength="200" value="${esc(dr.investigador)}">${CORREOS ? '<small>Recibe copia de la confirmación.</small>' : ''}</div>
       <div class="field"><label for="fMot">Actividad <span style="font-weight:400;color:var(--muted)">(opcional)</span></label><input id="fMot" maxlength="200" placeholder="p. ej. extracción de ADN, digestión ácida"></div>
       <p class="err" id="fErr" hidden></p>
       <div class="actions"><button type="button" class="btn" data-close>Cancelar</button><button type="submit" class="btn primary" id="fGo">Reservar</button></div>
@@ -286,6 +288,7 @@ function openForm(resId, date, start){
     $('repInfo').textContent = `${n} fecha${n === 1 ? '' : 's'}. Máximo ${SERIE_MESES} meses; si alguna fecha está ocupada o sin cupo, se omite y te avisamos.`;
     $('fGo').textContent = on ? `Reservar ${n} fecha${n === 1 ? '' : 's'}` : 'Reservar';
   };
+  $('fFin').addEventListener('change', () => { $('fTarde').hidden = Number($('fFin').value) <= 17*60; });
   $('fRep').addEventListener('change', repSync);
   $('repBox').addEventListener('change', repSync);
   $('fHasta').addEventListener('input', repSync);
@@ -298,7 +301,7 @@ function openForm(resId, date, start){
     let msg = '';
     if (nombre.length < 2) msg = 'Escribe tu nombre completo.';
     else if (!emailOk(alumno)) msg = 'Revisa tu correo; debe tener la forma nombre@dominio.mx.';
-    else if (!emailOk(investigador)) msg = 'Revisa el correo de la persona investigadora responsable.';
+    else if (!emailOk(investigador)) msg = 'Revisa el correo de la persona académica responsable.';
     const repetir = $('fRep').checked;
     if (!msg && repetir){
       const h = $('fHasta').value;
@@ -396,7 +399,7 @@ function openDetail(id){
   modal.querySelectorAll('[data-ask]').forEach(ask => ask.addEventListener('click', () => {
     const asAdmin = !own, serie = ask.dataset.ask === 'serie';
     const pregunta = serie ? '¿Cancelar todas las fechas pendientes de la serie?' : '¿Liberar este horario?';
-    $('cxl').innerHTML = `${asAdmin ? `<p class="note" style="flex-basis:100%">Cancelarás ${serie ? 'esta serie' : 'esta reserva'} con permisos de administración.${CORREOS ? ' Se avisará por correo a quien reservó y a la persona investigadora responsable.' : ''}</p>` : ''}<span style="margin-right:auto;font-size:14px">${pregunta}</span><button type="button" class="btn" data-close>No</button><button type="button" class="btn danger" id="dYes">Sí, cancelar</button>`;
+    $('cxl').innerHTML = `${asAdmin ? `<p class="note" style="flex-basis:100%">Cancelarás ${serie ? 'esta serie' : 'esta reserva'} con permisos de administración.${CORREOS ? ' Se avisará por correo a quien reservó y a la persona académica responsable.' : ''}</p>` : ''}<span style="margin-right:auto;font-size:14px">${pregunta}</span><button type="button" class="btn" data-close>No</button><button type="button" class="btn danger" id="dYes">Sí, cancelar</button>`;
     const yes = $('dYes'); yes.focus();
     yes.addEventListener('click', async () => {
       yes.disabled = true; yes.textContent = 'Cancelando…';
@@ -444,7 +447,7 @@ async function handleCancelLink(){
       if (serie) Object.keys(mine).forEach(k => { if (mine[k].s === rv.serie_id) delete mine[k]; });
       delete mine[id]; saveMine();
       const titulo = serie ? `Se cancelaron ${out.canceladas} fecha${out.canceladas === 1 ? '' : 's'}` : 'Reserva cancelada';
-      openModal(`<div class="ok"><span class="ok-mark" aria-hidden="true">✓</span><h2 id="mTitle">${titulo}</h2></div>${metaLine(r, b.date, b.start, b.end)}<p class="note">${serie ? 'Los horarios quedaron libres.' : 'El horario quedó libre.'}${CORREOS ? ' Se avisó por correo a quien reservó y a la persona investigadora responsable.' : ''}</p><div class="actions"><button type="button" class="btn primary" data-close>Listo</button></div>`);
+      openModal(`<div class="ok"><span class="ok-mark" aria-hidden="true">✓</span><h2 id="mTitle">${titulo}</h2></div>${metaLine(r, b.date, b.start, b.end)}<p class="note">${serie ? 'Los horarios quedaron libres.' : 'El horario quedó libre.'}${CORREOS ? ' Se avisó por correo a quien reservó y a la persona académica responsable.' : ''}</p><div class="actions"><button type="button" class="btn primary" data-close>Listo</button></div>`);
       load();
     } catch(e){
       const le = $('lErr'); le.textContent = e.message; le.hidden = false;

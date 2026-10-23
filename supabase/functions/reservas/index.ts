@@ -138,7 +138,7 @@ function validar(b: any): Datos | Response {
   const correo_alumno = String(b.correo_alumno ?? "").trim().toLowerCase();
   if (!correoOk(correo_alumno)) return fallo("Revisa tu correo.");
   const correo_investigador = String(b.correo_investigador ?? "").trim().toLowerCase();
-  if (!correoOk(correo_investigador)) return fallo("Revisa el correo de la persona investigadora responsable.");
+  if (!correoOk(correo_investigador)) return fallo("Revisa el correo de la persona académica responsable.");
   const actividad = String(b.actividad ?? "").trim().slice(0, 200) || null;
   return { recurso, ini, fin, nombre, correo_alumno, correo_investigador, actividad };
 }
@@ -375,7 +375,7 @@ const filasReserva = (r: Reserva): [string, string][] => [
   ["Fecha y hora", esc(cuando(r))],
   ["Reservó", esc(r.nombre)],
   ["Correo de quien reservó", esc(r.correo_alumno)],
-  ["Persona investigadora responsable", esc(r.correo_investigador)],
+  ["Persona académica responsable", esc(r.correo_investigador)],
   ...(r.actividad ? [["Actividad", esc(r.actividad)] as [string, string]] : []),
 ];
 
@@ -416,7 +416,7 @@ function correoSerie(d: any, creadas: { fecha: string }[], omitidas: { fecha: st
     [`Fechas (${creadas.length})`, esc(lista)],
     ["Reservó", esc(d.nombre)],
     ["Correo", esc(d.correo_alumno)],
-    ["Persona investigadora responsable", esc(d.correo_investigador)],
+    ["Persona académica responsable", esc(d.correo_investigador)],
   ];
   if (omitidas.length) filas.push(["No reservadas", esc(omitidas.map((o) => `${fCorta.format(new Date(o.fecha + "T12:00:00Z"))} (${o.motivo})`).join(", "))]);
   const link = enlaceCancelar({ id, token_cancelacion: token });
