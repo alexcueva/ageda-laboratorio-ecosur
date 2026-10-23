@@ -257,7 +257,7 @@ function openForm(resId, date, start){
         <div class="field"><label for="fFin">Término</label><select id="fFin">${opts}</select></div>
       </div>
       ${hint ? `<span class="hint">${hint}</span>` : ''}
-      <p class="note warn" id="fTarde"${fin0 > 17*60 ? '' : ' hidden'}>Después de las 17:00 solo se trabaja en compañía de una persona académica o técnica responsable. Por seguridad y por el transporte público, se recomienda trabajar temprano.</p>
+      <p class="note warn" id="fTarde"${fin0 > 17*60 ? '' : ' hidden'}>Después de las 17:00, una persona académica o técnica responsable debe estar en la Unidad Villahermosa y saber que estás en el laboratorio, por si ocurre un accidente o desperfecto. Por seguridad y por el transporte público, se recomienda trabajar temprano.</p>
       <label class="check"><input type="checkbox" id="fRep"> Repetir cada semana</label>
       <div id="repBox" class="repbox" hidden>
         <div class="field"><span class="lbl">Días de la semana</span>
